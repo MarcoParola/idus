@@ -1,0 +1,50 @@
+defaults:
+  - _self_
+  - detr
+  - yolos
+  
+seed: 42
+numGroups: 8
+growthRate: 32
+currentDir: ${hydra:runtime.cwd}
+
+# MARK: - yolo dataset
+targetHeight: 608
+targetWidth: 608
+
+# MARK: - miscellaneous
+device: cuda
+weight: ""
+
+
+# MARK: - training config
+lr: 5e-7
+lrBackbone: 1e-5
+batchSize: 8
+weightDecay: 1e-4
+epochs: 100
+lrDrop: 1000
+clipMaxNorm: .1
+patience: 15
+
+# MARK: - loss
+classCost: .005
+bboxCost: 5.
+giouCost: 2.5
+eosCost: .1
+
+# MARK: - dataset
+dataDir: ${hydra:runtime.cwd}/data/
+trainAnnFile: ${hydra:runtime.cwd}/data/new/Train.json
+valAnnFile: ${hydra:runtime.cwd}/data/new/Valid.json
+testAnnFile: ${hydra:runtime.cwd}/data/new/Test.json
+
+# MARK: - miscellaneous
+outputDir: ${hydra:runtime.cwd}/checkpoint
+numWorkers: 1
+multi: False
+amp: False
+
+# MARK: - wandb
+wandbEntity: marcoparola
+wandbProject: conditioning-transformer
