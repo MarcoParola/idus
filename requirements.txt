@@ -1,0 +1,7 @@
+torch
+matplotlib
+hydra-core
+wandb
+torchvision
+transformers
+datasets
