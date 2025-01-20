@@ -4,7 +4,7 @@ defaults:
   - yolos
   
 seed: 42
-numGroups: 8
+numClass: 8
 growthRate: 32
 currentDir: ${hydra:runtime.cwd}
 
@@ -34,6 +34,7 @@ giouCost: 2.5
 eosCost: .1
 
 # MARK: - dataset
+dataset: "oxford-pet"
 dataDir: ${hydra:runtime.cwd}/data/
 trainAnnFile: ${hydra:runtime.cwd}/data/new/Train.json
 valAnnFile: ${hydra:runtime.cwd}/data/new/Valid.json
@@ -46,5 +47,5 @@ multi: False
 amp: False
 
 # MARK: - wandb
-wandbEntity: marcoparola
-wandbProject: conditioning-transformer
+wandbEntity: p-manco-universit-di-pisa
+wandbProject: idus

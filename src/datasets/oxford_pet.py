@@ -39,6 +39,7 @@ class OxfordPetDataset(DetectionDataset):
         __getitem__ returns a tuple of image and target (bbox and label) filtering out the other classes
     """
     def __init__(self, hf_dataset, resize=224, transform=None):
+        super().__init__()
         self.hf_dataset = hf_dataset
         self.resize = resize
         self.transforms = transform
@@ -67,7 +68,7 @@ class OxfordPetDataset(DetectionDataset):
         if len(annotations) == 0:
             targets = {
                 'boxes': torch.zeros(1, 4, dtype=torch.float32),
-                'labels': torch.as_tensor([self.numClass], dtype=torch.int64),}
+                'labels': torch.as_tensor([cfg.numClass], dtype=torch.int64),}
         else:
             targets = {
                 'boxes': torch.as_tensor(annotations[..., :-1], dtype=torch.float32),
