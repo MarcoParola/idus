@@ -1,11 +1,14 @@
-from src.utils import boxOps
-import torch
-import torch.nn.functional as F
-from torch import nn, Tensor
-from functools import partial
-from typing import Dict, Union, List, Tuple
+import os
 
-from .backbone import *
+import hydra
+from omegaconf import DictConfig
+
+from src.utils import boxOps
+
+from torch import Tensor
+from typing import Dict, Union, List
+
+from src.models.yolos.backbone import *
 from src.models.mlp import MLP
 
 
@@ -51,33 +54,106 @@ class Yolos(nn.Module):
         return attention
     '''
 
+
 class PostProcess(nn.Module):
-    """ This module converts the model's output into the format expected by the coco api"""
+    """ This module converts the model's output into the format expected by the COCO API """
+
     @torch.no_grad()
     def forward(self, outputs, target_sizes):
-        """ Perform the computation
+        """
         Parameters:
             outputs: raw outputs of the model
-            target_sizes: tensor of dimension [batch_size x 2] containing the size of each images of the batch
-                          For evaluation, this must be the original image size (before any data augmentation)
-                          For visualization, this should be the image size after data augment, but before padding
+            target_sizes: tensor of shape [batch_size x 2], containing the size of each image in the batch
+                          (height, width) for scaling back bounding boxes.
         """
-        out_logits, out_bbox = outputs['pred_logits'], outputs['pred_boxes']
+        # Accessing class probabilities and bounding boxes
+        out_logits, out_bbox = outputs['class'], outputs['bbox']
 
-        assert len(out_logits) == len(target_sizes)
-        assert target_sizes.shape[1] == 2
+        # Softmax over the class probabilities
+        prob = torch.softmax(out_logits, -1)
 
-        prob = F.softmax(out_logits, -1)
-        scores, labels = prob[..., :-1].max(-1)
+        results = []
+        for i in range(out_logits.shape[0]):  # Process each image independently
+            # Extract scores and labels for the current image
+            scores, labels = prob[i, :, :-1].max(-1)  # Exclude the background class
 
-        # convert to [x0, y0, x1, y1] format
-        boxes = boxOps.boxCxcywh2Xyxy(out_bbox)
-        # and from relative [0, 1] to absolute [0, height] coordinates
-        img_h, img_w = target_sizes.unbind(1)
-        scale_fct = torch.stack([img_w, img_h, img_w, img_h], dim=1)
-        boxes = boxes * scale_fct[:, None, :]
+            # Convert bounding boxes to [x0, y0, x1, y1]
+            boxes = boxOps.boxCxcywh2Xyxy(out_bbox[i])  # [100, 4]
 
-        results = [{'scores': s, 'labels': l, 'boxes': b} for s, l, b in zip(scores, labels, boxes)]
+            # Scale boxes to the original image size
+            img_h, img_w = target_sizes[i]
+            scale_fct = torch.tensor([img_w, img_h, img_w, img_h], device=boxes.device)
+            boxes = boxes * scale_fct
+
+            # Store results for this image
+            results.append({'scores': scores, 'labels': labels, 'boxes': boxes})
 
         return results
+
+
+@hydra.main(config_path="C:\\Users\pietr\PycharmProjects\idus\config", config_name="config")
+def main(cfg: DictConfig):
+    # Set up device
+    device = torch.device(cfg.device if torch.cuda.is_available() else "cpu")
+
+    # Initialize model
+    model = Yolos(cfg).to(device)
+    post_process = PostProcess()
+
+    # Example: Create a dummy input tensor
+    dummy_input = torch.randn(cfg.batchSize, cfg.inChans, cfg.targetHeight, cfg.targetWidth).to(device)
+
+    # Run model
+    outputs = model(dummy_input)
+
+    # Assert the output structure
+    assert isinstance(outputs, dict), "Model output is not a dictionary"
+    assert 'class' in outputs, "Key 'class' missing in model output"
+    assert 'bbox' in outputs, "Key 'bbox' missing in model output"
+
+    # Check dimensions
+    batch_size = cfg.batchSize
+    num_classes = cfg.numClass + 1  # Including background class
+    assert outputs['class'].shape[0] == cfg.batchSize, \
+        f"Expected batch size {cfg.batchSize} in 'class', got {outputs['class'].shape[0]}"
+    assert outputs['class'].shape[1] == 100, \
+        f"Expected 100 detection tokens in 'class', got {outputs['class'].shape[1]}"
+    assert outputs['class'].shape[2] == cfg.numClass + 1, \
+        f"Expected {cfg.numClass + 1} classes in 'class', got {outputs['class'].shape[2]}"
+
+    assert outputs['bbox'].shape[0] == cfg.batchSize, \
+        f"Expected batch size {cfg.batchSize} in 'bbox', got {outputs['bbox'].shape[0]}"
+    assert outputs['bbox'].shape[1] == 100, \
+        f"Expected 100 detection tokens in 'bbox', got {outputs['bbox'].shape[1]}"
+    assert outputs['bbox'].shape[2] == 4, \
+        f"Expected 4 bounding box coordinates in 'bbox', got {outputs['bbox'].shape[2]}"
+
+    # Target sizes (for post-processing)
+    target_sizes = torch.tensor([[cfg.targetHeight, cfg.targetWidth]] * cfg.batchSize, device=device)
+
+    # Post-process results
+    results = post_process(outputs, target_sizes)
+
+    results = post_process(outputs, target_sizes)
+
+    # Assert the structure of post-processed results
+    assert isinstance(results, list), "Post-processed results should be a list"
+    assert len(results) == cfg.batchSize, f"Expected {cfg.batchSize} results, got {len(results)}"
+    for i, result in enumerate(results):
+        assert 'scores' in result, f"Missing 'scores' in results[{i}]"
+        assert 'labels' in result, f"Missing 'labels' in results[{i}]"
+        assert 'boxes' in result, f"Missing 'boxes' in results[{i}]"
+        assert result['boxes'].shape[-1] == 4, "Bounding box does not have 4 coordinates"
+
+    print("All assertions passed!")
+
+    # Optional: Save model weights
+    if cfg.weight:
+        os.makedirs(os.path.dirname(cfg.weight), exist_ok=True)
+        torch.save(model.state_dict(), cfg.weight)
+        print(f"Model weights saved to {cfg.weight}")
+
+
+if __name__ == "__main__":
+    main()
 

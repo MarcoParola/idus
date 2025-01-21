@@ -7,7 +7,7 @@ from PIL import Image
 from torchvision.transforms import ToPILImage, ToTensor
 import numpy as np
 
-from .dataset import DetectionDataset
+from src.datasets.dataset import DetectionDataset
 
 
 def load_oxford_dataset(resize=224, transform=None):
@@ -68,7 +68,7 @@ class OxfordPetDataset(DetectionDataset):
         if len(annotations) == 0:
             targets = {
                 'boxes': torch.zeros(1, 4, dtype=torch.float32),
-                'labels': torch.as_tensor([cfg.numClass], dtype=torch.int64),}
+                'labels': torch.as_tensor([len(self.classes)], dtype=torch.int64),}
         else:
             targets = {
                 'boxes': torch.as_tensor(annotations[..., :-1], dtype=torch.float32),
@@ -109,7 +109,6 @@ if __name__ == "__main__":
     train, val, test = load_oxford_dataset(resize=128, transform=transform)
 
     import numpy as np
-    import cv2
     from PIL import Image
     from torchvision.transforms import ToPILImage, ToTensor
     import matplotlib.pyplot as plt
