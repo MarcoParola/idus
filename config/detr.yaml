@@ -8,7 +8,6 @@ numDecoderLayer: 6
 dimFeedForward: 2048
 dropout: .1
 numQuery: 80
-numClass: 4
 numBlocks:
   - 6
   - 6

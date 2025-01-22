@@ -1,9 +1,12 @@
 from typing import Tuple, List, Dict
+
 import hydra
+import torch
+import torchvision
 from omegaconf import DictConfig
 from torch import Tensor
-import torch
 from torch.utils.data import Dataset, DataLoader
+import numpy as np
 
 
 class DetectionDataset(Dataset):
@@ -11,12 +14,21 @@ class DetectionDataset(Dataset):
         pass
 
     def __len__(self):
-        # Return the length of the dataset (for testing purposes, returning a fixed value)
         return 10  # Dummy length for testing
 
     def __getitem__(self, idx):
-        # Return a dummy sample for testing
-        return torch.randn(3, 224, 224), {'label': torch.tensor(1)}  # Dummy image and label
+        # Generate single channel image
+        image = torch.randn(1, 224, 224)
+
+        # Ensure all tensors have correct dtypes
+        target = {
+            'labels': torch.tensor([1], dtype=torch.long),  # Explicitly using long dtype for labels
+            'boxes': torch.tensor([[0.0, 0.0, 100.0, 100.0]], dtype=torch.float32),
+            'masks': torch.ones((1, 224, 224), dtype=torch.bool),
+            'image_id': torch.tensor([idx], dtype=torch.long)
+        }
+
+        return image.float(), target  # Ensure image is float
 
     def __iter__(self):
         return self
@@ -27,15 +39,58 @@ def load_datasets(args):
 
     if args.dataset == "oxford-pet":
         from src.datasets.oxford_pet import load_oxford_dataset
-        train, val, test = load_oxford_dataset()
+        from torchvision.transforms import Grayscale
+
+        transform = torchvision.transforms.Compose([
+            torchvision.transforms.Resize((128, 128)),
+            Grayscale(num_output_channels=1),  # Convert RGB to grayscale
+            torchvision.transforms.ToTensor(),
+        ])
+
+        train, val, test = load_oxford_dataset(resize=128, transform=transform)
 
     return train, val, test
 
 
 def collateFunction(batch: List[Tuple[Tensor, dict]]) -> Tuple[Tensor, List[Dict[str, Tensor]]]:
-    images, targets = zip(*batch)  # Unzip the batch into images and targets
-    images_tensor = torch.stack(images)  # Stack the images into a tensor
-    targets_list = list(targets)  # Convert the targets to a list
+    images, targets = zip(*batch)
+
+    # Convert any numpy arrays to tensors with correct dtypes
+    images = [torch.from_numpy(img).float() if isinstance(img, np.ndarray) else img.float() for img in images]
+
+    # For RGB images, convert to grayscale if needed
+    images = [img.mean(dim=0, keepdim=True) if img.size(0) == 3 else img for img in images]
+
+    # Stack images and ensure they're float tensors
+    images_tensor = torch.stack(images).float()
+
+    # Convert any numpy arrays in targets to tensors with correct dtypes
+    targets_list = []
+    for target in targets:
+        tensor_target = {}
+        for k, v in target.items():
+            if isinstance(v, np.ndarray):
+                if k == 'labels':
+                    tensor_target[k] = torch.from_numpy(v).long()
+                elif k == 'masks':
+                    tensor_target[k] = torch.from_numpy(v).bool()
+                else:
+                    tensor_target[k] = torch.from_numpy(v).float()
+            elif isinstance(v, Tensor):
+                if k == 'labels':
+                    tensor_target[k] = v.long()
+                elif k == 'masks':
+                    tensor_target[k] = v.bool()
+                else:
+                    tensor_target[k] = v.float()
+            else:
+                if k == 'labels':
+                    tensor_target[k] = torch.tensor(v, dtype=torch.long)
+                elif k == 'masks':
+                    tensor_target[k] = torch.tensor(v, dtype=torch.bool)
+                else:
+                    tensor_target[k] = torch.tensor(v, dtype=torch.float32)
+        targets_list.append(tensor_target)
 
     return images_tensor, targets_list
 

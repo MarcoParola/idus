@@ -4,7 +4,8 @@ defaults:
   - yolos
   
 seed: 42
-numClass: 8
+numGroups: 8
+numClass: 37
 growthRate: 32
 currentDir: ${hydra:runtime.cwd}
 

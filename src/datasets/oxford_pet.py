@@ -68,7 +68,7 @@ class OxfordPetDataset(DetectionDataset):
         if len(annotations) == 0:
             targets = {
                 'boxes': torch.zeros(1, 4, dtype=torch.float32),
-                'labels': torch.as_tensor([len(self.classes)], dtype=torch.int64),}
+                'labels': torch.as_tensor(len(self.classes), dtype=torch.int64),}
         else:
             targets = {
                 'boxes': torch.as_tensor(annotations[..., :-1], dtype=torch.float32),
@@ -83,7 +83,6 @@ class OxfordPetDataset(DetectionDataset):
 
 
     def loadAnnotations(self, sample, imgWidth: int, imgHeight: int) -> np.ndarray:
-        print(imgWidth, imgHeight)
         ans = []
         for annotation in sample['label_bbox_enriched']:
             if annotation['label'] not in ['cat', 'dog']:
@@ -91,11 +90,9 @@ class OxfordPetDataset(DetectionDataset):
             # get index of the class from self.classes
             cat = self.classes.index(sample['label_breed'])
             bbox = annotation['bbox']
-            print(bbox)
             bbox = [bbox[0]/imgWidth, bbox[1]/imgHeight, bbox[2]/imgWidth, bbox[3]/imgHeight]
-            print(bbox)
             ans.append(bbox + [cat])
-        
+
         return np.asarray(ans)
 
 

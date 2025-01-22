@@ -11,9 +11,9 @@ from tqdm import tqdm
 
 from src.datasets.dataset import collateFunction, load_datasets
 from src.models import SetCriterion
+from src.utils.utils import load_model
 from src.utils import cast2Float
 from src.utils import EarlyStopping
-from src.utils.utils import load_model
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -146,6 +146,33 @@ def main(args):
             for k, v in valMetrics.items():
                 wandb.log({f"val/{k}": v.item()}, step=epoch * batches)
 
+        # check if the model is estrnn-yolos, if so, predict the first 10 images of the val set
+        if args.model == 'estrnn-yolos':
+            for _i in range(20):
+                img, target = val_dataset.__getitem__(_i)
+                print(img.shape)
+
+                pred = model.estrnn_enhancer(img.unsqueeze(0))
+
+                print(img.shape, pred.shape)
+
+                # get first image among the frames and sum it to the prediction
+                img = img[0].squeeze().cpu().numpy()
+                pred = pred.squeeze().detach().cpu().numpy()
+                enhanced_img = img + pred
+
+                # save both original and predicted images
+                from skimage.io import imsave
+
+                # scale the image to 0-1
+                enhanced_img = (enhanced_img - enhanced_img.min()) / (enhanced_img.max() - enhanced_img.min())
+                img = (img - img.min()) / (img.max() - img.min())
+                # convert to 0-255
+                enhanced_img = (enhanced_img * 255).astype(np.uint8)
+                img = (img * 255).astype(np.uint8)
+                imsave(f"{wandb.run.dir}/val_epoch{epoch}_img_{_i}.png", enhanced_img)
+                imsave(f"{wandb.run.dir}/val_img_{_i}_original.png", img)
+
         model.train()
         criterion.train()
 
@@ -153,7 +180,7 @@ def main(args):
         if avgLoss < prevBestLoss:
             print('[+] Loss improved from {:.8f} to {:.8f}, saving model...'.format(prevBestLoss, avgLoss))
             torch.save(model.state_dict(), f'{wandb.run.dir}/best.pt')
-            wandb.save(f'{wandb.run.dir}/best.pt')
+            #wandb.save(f'{wandb.run.dir}/best.pt')
             prevBestLoss = avgLoss
 
         # MARK: - early stopping
