@@ -61,7 +61,6 @@ class OxfordPetDataset(DetectionDataset):
         sample = self.hf_dataset.__getitem__(idx)
         image = sample['image']
         image = np.array(image)
-        print(image.shape)
 
         annotations = self.loadAnnotations(sample, image.shape[1]/self.resize, image.shape[0]/self.resize)
 
