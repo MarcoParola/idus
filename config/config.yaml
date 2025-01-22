@@ -8,6 +8,7 @@ numGroups: 8
 numClass: 37
 growthRate: 32
 currentDir: ${hydra:runtime.cwd}
+inChans: 3
 
 # MARK: - yolo dataset
 targetHeight: 608

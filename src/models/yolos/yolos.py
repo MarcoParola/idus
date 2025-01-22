@@ -91,7 +91,8 @@ class PostProcess(nn.Module):
         return results
 
 
-@hydra.main(config_path="C:\\Users\pietr\PycharmProjects\idus\config", config_name="config")
+@hydra.main(config_path="C:\\Users\pietr\PycharmProjects\idus\config",
+            config_name="config", version_base="1.3")
 def main(cfg: DictConfig):
     # Set up device
     device = torch.device(cfg.device if torch.cuda.is_available() else "cpu")
@@ -99,6 +100,12 @@ def main(cfg: DictConfig):
     # Initialize model
     model = Yolos(cfg).to(device)
     post_process = PostProcess()
+
+    # Verify model input channels
+    input_channels = model.backbone.patch_embed.proj.weight.shape[1]
+    print(input_channels)
+    assert input_channels == cfg.inChans, \
+        f"Expected input channels {cfg.inChans}, but got {input_channels}"
 
     # Example: Create a dummy input tensor
     dummy_input = torch.randn(cfg.batchSize, cfg.inChans, cfg.targetHeight, cfg.targetWidth).to(device)
@@ -112,8 +119,6 @@ def main(cfg: DictConfig):
     assert 'bbox' in outputs, "Key 'bbox' missing in model output"
 
     # Check dimensions
-    batch_size = cfg.batchSize
-    num_classes = cfg.numClass + 1  # Including background class
     assert outputs['class'].shape[0] == cfg.batchSize, \
         f"Expected batch size {cfg.batchSize} in 'class', got {outputs['class'].shape[0]}"
     assert outputs['class'].shape[1] == 100, \
@@ -132,8 +137,6 @@ def main(cfg: DictConfig):
     target_sizes = torch.tensor([[cfg.targetHeight, cfg.targetWidth]] * cfg.batchSize, device=device)
 
     # Post-process results
-    results = post_process(outputs, target_sizes)
-
     results = post_process(outputs, target_sizes)
 
     # Assert the structure of post-processed results

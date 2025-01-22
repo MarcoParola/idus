@@ -16,7 +16,7 @@ from src.utils import cast2Float
 from src.utils import EarlyStopping
 
 
-@hydra.main(config_path="config", config_name="config")
+@hydra.main(config_path="config", config_name="config", version_base="1.3")
 def main(args):
     print("Starting training...")
 
