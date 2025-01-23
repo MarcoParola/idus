@@ -47,7 +47,7 @@ def remove_alpha_channel(img):
 def collateFunction(batch: List[Tuple[Tensor, dict]]) -> Tuple[Tensor, List[Dict[str, Tensor]]]:
     images, targets = zip(*batch)
 
-    # Convert any numpy arrays to tensors with correct dtypes
+    # Convert any numpy arrays to tensors with correct dtypes.
     images = [torch.from_numpy(img).float() if isinstance(img, np.ndarray) else img.float() for img in images]
 
     # Stack images and ensure they're float tensors
