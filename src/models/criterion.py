@@ -79,7 +79,7 @@ class SetCriterion(nn.Module):
         # MARK: - compute statistics
         with torch.no_grad():
             predClass = nn.functional.softmax(logits[idx], -1).max(-1)[1]
-            classMask = (predClass == targetClassO)[mask]
+            classMask = (predClass == targetClassO) & mask
             iou = torch.diag(boxIoU(boxCxcywh2Xyxy(boxes), boxCxcywh2Xyxy(targetBoxes))[0])
             iou_th = [50, 75, 95]
             map_th = []

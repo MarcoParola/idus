@@ -1,10 +1,8 @@
 from datasets import load_dataset
 from typing import Tuple
 from torch import Tensor
-import torchvision
 import torch
 from PIL import Image
-from torchvision.transforms import ToPILImage, ToTensor
 import numpy as np
 
 from src.datasets.dataset import DetectionDataset
@@ -93,72 +91,5 @@ class OxfordPetDataset(DetectionDataset):
             ans.append(bbox + [cat])
 
         return np.asarray(ans)
-
-
-if __name__ == "__main__":
-
-    transform = torchvision.transforms.Compose([
-        torchvision.transforms.Resize((128, 128)),
-        torchvision.transforms.ToTensor(),
-    ])
-
-    train, val, test = load_oxford_dataset(resize=128, transform=transform)
-
-    import numpy as np
-    from PIL import Image
-    from torchvision.transforms import ToPILImage, ToTensor
-    import matplotlib.pyplot as plt
-    
-    for i in range(50):
-        image_dataset, target_dataset = test.__getitem__(i)
-        # plot
-        image = ToPILImage()(image_dataset)
-        image = np.array(image)
-        plt.imshow(image)
-
-        for bbox in target_dataset['boxes']:
-            x, y, w, h = bbox
-            x, y, w, h = x*128, y*128, w*128, h*128
-            # Draw the bounding box on the image using matplotlib
-            plt.plot([x, x + w, x + w, x, x], [y, y, y + h, y + h, y], color='r', linewidth=2)
-
-        plt.show()
-    
-
-    '''
-    for i in range(10):
-        tmp = test.__getitem__(i)
-        pippo = dataset_train.__getitem__(i)
-        print(tmp)       
-        print(type(tmp['image']))
-
-        image = tmp['image']
-        bboxes = tmp['label_bbox_enriched']
-        
-        image = ToTensor()(image)  # Convert to Tensor first
-        image = ToPILImage()(image)  
-        image = np.array(image)
-
-        image_train = pippo[0]
-        target_train = pippo[1]
-
-        # plot 2 images in subplots
-        fig, axs = plt.subplots(1, 2, figsize=(10, 5))
-        axs[0].imshow(image)
-        axs[0].set_title('Original image')
-        for bbox in bboxes:
-            x, y, w, h = bbox['bbox']
-            # Draw the bounding box on the image using matplotlib
-            axs[0].plot([x, x + w, x + w, x, x], [y, y, y + h, y + h, y], color='r', linewidth=2)
-
-        axs[1].imshow(image_train.permute(1, 2, 0))
-        axs[1].set_title('Transformed image')
-        for bbox in target_train['boxes']:
-            x, y, w, h = bbox
-            # Draw the bounding box on the image using matplotlib
-            axs[1].plot([x, x + w, x + w, x, x], [y, y, y + h, y + h, y], color='r', linewidth=2)
-            
-        plt.show()
-    '''
 
     
