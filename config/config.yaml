@@ -2,7 +2,11 @@ defaults:
   - _self_
   - detr
   - yolos
-  
+
+hydra:
+  run:
+    dir: C:\Users\pietr\PycharmProjects\idus\outputs
+
 seed: 42
 numGroups: 8
 numClass: 37

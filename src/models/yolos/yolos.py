@@ -1,8 +1,3 @@
-import os
-
-import hydra
-from omegaconf import DictConfig
-
 from src.utils import boxOps
 
 from torch import Tensor
@@ -25,36 +20,38 @@ class Yolos(nn.Module):
             self.backbone, hidden_dim = small_dWr(in_chans=args.inChans, pretrained=args.yolos.pre_trained)
         else:
             raise ValueError(f'backbone {args.yolos.backboneName} not supported')
-        
+
         self.backbone.finetune_det(
-            det_token_num=args.yolos.detTokenNum, 
-            img_size=args.yolos.init_pe_size, 
-            mid_pe_size=args.yolos.mid_pe_size, 
+            det_token_num=args.yolos.detTokenNum,
+            img_size=args.yolos.init_pe_size,
+            mid_pe_size=args.yolos.mid_pe_size,
             use_checkpoint=args.yolos.use_checkpoint)
-        
+
         self.class_embed = MLP(hidden_dim, hidden_dim, args.numClass + 1, 3)
         self.bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
 
-    
     def forward(self, x: Tensor, meta=None) -> Dict[str, Union[Tensor, List[Dict[str, Tensor]]]]:
+
+        # Process the input through the backbone
         x = self.backbone(x)
         x = x.unsqueeze(0)
+
+        # Create temporary variables for class and bbox outputs
         outputs_class = self.class_embed(x)
         outputs_coord = self.bbox_embed(x).sigmoid()
-        
-        return {'class': outputs_class[-1],
-                'bbox': outputs_coord[-1],
-                'aux': [{'class': oc, 'bbox': ob} for oc, ob in zip(outputs_class[:-1], outputs_coord[:-1])]}
 
-    '''
-    def forward_return_attention(self, samples: NestedTensor):
-        if isinstance(samples, (list, torch.Tensor)):
-            samples = nested_tensor_from_tensor_list(samples)
-        attention = self.backbone(samples.tensors, return_attention=True)
-        return attention
-    '''
+        # Temporary results in case you don't want to return them
+        results = {
+            'class': outputs_class[-1],
+            'bbox': outputs_coord[-1],
+            'aux': [{'class': oc, 'bbox': ob} for oc, ob in zip(outputs_class[:-1], outputs_coord[:-1])]
+        }
+
+        # Instead of returning results directly, you can handle them here or return a minimal output
+        return results  # Return this for model testing or just modify based on use case
 
 
+# Updated PostProcess (same, you can keep as is for post-processing if needed)
 class PostProcess(nn.Module):
     """ This module converts the model's output into the format expected by the COCO API """
 
@@ -89,74 +86,3 @@ class PostProcess(nn.Module):
             results.append({'scores': scores, 'labels': labels, 'boxes': boxes})
 
         return results
-
-
-@hydra.main(config_path="C:\\Users\pietr\PycharmProjects\idus\config",
-            config_name="config", version_base="1.3")
-def main(cfg: DictConfig):
-    # Set up device
-    device = torch.device(cfg.device if torch.cuda.is_available() else "cpu")
-
-    # Initialize model
-    model = Yolos(cfg).to(device)
-    post_process = PostProcess()
-
-    # Verify model input channels
-    input_channels = model.backbone.patch_embed.proj.weight.shape[1]
-    print(input_channels)
-    assert input_channels == cfg.inChans, \
-        f"Expected input channels {cfg.inChans}, but got {input_channels}"
-
-    # Example: Create a dummy input tensor
-    dummy_input = torch.randn(cfg.batchSize, cfg.inChans, cfg.targetHeight, cfg.targetWidth).to(device)
-
-    # Run model
-    outputs = model(dummy_input)
-
-    # Assert the output structure
-    assert isinstance(outputs, dict), "Model output is not a dictionary"
-    assert 'class' in outputs, "Key 'class' missing in model output"
-    assert 'bbox' in outputs, "Key 'bbox' missing in model output"
-
-    # Check dimensions
-    assert outputs['class'].shape[0] == cfg.batchSize, \
-        f"Expected batch size {cfg.batchSize} in 'class', got {outputs['class'].shape[0]}"
-    assert outputs['class'].shape[1] == 100, \
-        f"Expected 100 detection tokens in 'class', got {outputs['class'].shape[1]}"
-    assert outputs['class'].shape[2] == cfg.numClass + 1, \
-        f"Expected {cfg.numClass + 1} classes in 'class', got {outputs['class'].shape[2]}"
-
-    assert outputs['bbox'].shape[0] == cfg.batchSize, \
-        f"Expected batch size {cfg.batchSize} in 'bbox', got {outputs['bbox'].shape[0]}"
-    assert outputs['bbox'].shape[1] == 100, \
-        f"Expected 100 detection tokens in 'bbox', got {outputs['bbox'].shape[1]}"
-    assert outputs['bbox'].shape[2] == 4, \
-        f"Expected 4 bounding box coordinates in 'bbox', got {outputs['bbox'].shape[2]}"
-
-    # Target sizes (for post-processing)
-    target_sizes = torch.tensor([[cfg.targetHeight, cfg.targetWidth]] * cfg.batchSize, device=device)
-
-    # Post-process results
-    results = post_process(outputs, target_sizes)
-
-    # Assert the structure of post-processed results
-    assert isinstance(results, list), "Post-processed results should be a list"
-    assert len(results) == cfg.batchSize, f"Expected {cfg.batchSize} results, got {len(results)}"
-    for i, result in enumerate(results):
-        assert 'scores' in result, f"Missing 'scores' in results[{i}]"
-        assert 'labels' in result, f"Missing 'labels' in results[{i}]"
-        assert 'boxes' in result, f"Missing 'boxes' in results[{i}]"
-        assert result['boxes'].shape[-1] == 4, "Bounding box does not have 4 coordinates"
-
-    print("All assertions passed!")
-
-    # Optional: Save model weights
-    if cfg.weight:
-        os.makedirs(os.path.dirname(cfg.weight), exist_ok=True)
-        torch.save(model.state_dict(), cfg.weight)
-        print(f"Model weights saved to {cfg.weight}")
-
-
-if __name__ == "__main__":
-    main()
-
