@@ -50,6 +50,11 @@ def main(args):
     criterion = SetCriterion(args).to(device)
     model = load_model(args).to(device)
 
+    with torch.no_grad():
+        # Set the background class bias to match DETR's initialization
+        bias_value = -torch.log(torch.tensor((1 - 0.01) / 0.01))  # -ln(99) ≈ -4.595
+        model.class_embed.layers[-1].bias.data[-1] = bias_value  # Modify the last bias (background class)
+
     # separate learning rate
     paramDicts = [
         {"params": [p for n, p in model.named_parameters() if "backbone" not in n and p.requires_grad]},
