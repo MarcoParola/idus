@@ -2,11 +2,17 @@ defaults:
   - _self_
   - detr
   - yolos
-  
+
+hydra:
+  run:
+    dir: C:\Users\pietr\PycharmProjects\idus\outputs
+
 seed: 42
 numGroups: 8
+numClass: 37
 growthRate: 32
 currentDir: ${hydra:runtime.cwd}
+inChans: 3
 
 # MARK: - yolo dataset
 targetHeight: 608
@@ -18,9 +24,9 @@ weight: ""
 
 
 # MARK: - training config
-lr: 5e-7
+lr: 1e-5
 lrBackbone: 1e-5
-batchSize: 8
+batchSize: 64
 weightDecay: 1e-4
 epochs: 100
 lrDrop: 1000
@@ -28,12 +34,13 @@ clipMaxNorm: .1
 patience: 15
 
 # MARK: - loss
-classCost: .005
-bboxCost: 5.
-giouCost: 2.5
-eosCost: .1
+classCost: 5
+bboxCost: 0.2
+giouCost: 0.2
+eosCost: 0
 
 # MARK: - dataset
+dataset: "oxford-pet"
 dataDir: ${hydra:runtime.cwd}/data/
 trainAnnFile: ${hydra:runtime.cwd}/data/new/Train.json
 valAnnFile: ${hydra:runtime.cwd}/data/new/Valid.json
@@ -46,5 +53,5 @@ multi: False
 amp: False
 
 # MARK: - wandb
-wandbEntity: marcoparola
-wandbProject: conditioning-transformer
+wandbEntity: p-manco-universit-di-pisa
+wandbProject: idus
