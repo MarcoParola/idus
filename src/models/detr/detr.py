@@ -1,5 +1,5 @@
 import os
-from typing import Dict, Union, List, Tuple
+from typing import Dict, Union, List
 import torch
 from torch import nn, Tensor
 from torch.quantization import quantize_dynamic
