@@ -7,6 +7,7 @@ hydra:
   run:
     dir: C:\Users\pietr\PycharmProjects\idus\outputs
 
+model: null
 seed: 42
 numGroups: 8
 numClass: 37
@@ -24,9 +25,9 @@ weight: ""
 
 
 # MARK: - training config
-lr: 1e-5
+lr: 1e-7
 lrBackbone: 1e-5
-batchSize: 64
+batchSize: 16
 weightDecay: 1e-4
 epochs: 100
 lrDrop: 1000

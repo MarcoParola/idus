@@ -1,8 +1,8 @@
 from typing import List, Tuple
 import torch
 from torch import nn, Tensor
-
 from src.models.embedding import PositionEmbeddingSine
+from src.models.transformer import Transformer
 
 
 class TransitionLayer(nn.Module):
@@ -100,8 +100,33 @@ class Joiner(nn.Module):
         features = self.backbone(x)
         return features, self.positionEmbedding(features)
 
+def tiny():
+    # Transformer parameters are fixed for tiny version
+    transformer = Transformer(
+        hiddenDims=128, numHead=4, numEncoderLayer=6, numDecoderLayer=6,
+        dimFeedForward=512, dropout=0.1
+    )
+    return transformer, 128
 
-def buildBackbone(args):
-    positionEmbedding = PositionEmbeddingSine(args.hiddenDims // 2)
-    denseNet = DenseNet(args.numGroups, args.growthRate, args.numBlocks, args.inChans)
+
+def small():
+    # Fixed transformer parameters for small version
+    transformer = Transformer(
+        hiddenDims=256, numHead=8, numEncoderLayer=8, numDecoderLayer=8,
+        dimFeedForward=1024, dropout=0.1
+    )
+    return transformer, 256
+
+
+def base():
+    # Fixed transformer parameters for base version
+    transformer = Transformer(
+        hiddenDims=512, numHead=16, numEncoderLayer=12, numDecoderLayer=12,
+        dimFeedForward=2048, dropout=0.1
+    )
+    return transformer, 512
+
+def buildBackbone(args, hidden_dim: int):
+    positionEmbedding = PositionEmbeddingSine(hidden_dim // 2)
+    denseNet = DenseNet(args.numGroups, args.growthRate, args.detr.numBlocks)
     return Joiner(denseNet, positionEmbedding)
