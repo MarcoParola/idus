@@ -25,20 +25,20 @@ weight: ""
 
 
 # MARK: - training config
-lr: 1e-7
+lr: 1e-6
 lrBackbone: 1e-5
-batchSize: 16
+batchSize: 8
 weightDecay: 1e-4
 epochs: 100
-lrDrop: 1000
+lrDrop: 50
 clipMaxNorm: .1
 patience: 15
 
 # MARK: - loss
 classCost: 5
-bboxCost: 0.2
-giouCost: 0.2
-eosCost: 0
+bboxCost: 0.5
+giouCost: 0.5
+eosCost: 0.01
 
 # MARK: - dataset
 dataset: "oxford-pet"

@@ -24,8 +24,8 @@ class SetCriterion(nn.Module):
     def forward(self, x: Dict[str, Tensor], y: List[Dict[str, Tensor]]) -> Dict[str, Tensor]:
         ans = self.computeLoss(x, y)
 
-        for i, aux in enumerate(x['aux']):
-            ans.update({f'{k}_aux{i}': v for k, v in self.computeLoss(aux, y).items()})
+        #for i, aux in enumerate(x['aux']):
+            #ans.update({f'{k}_aux{i}': v for k, v in self.computeLoss(aux, y).items()})
 
         return ans
 
@@ -68,7 +68,6 @@ class SetCriterion(nn.Module):
             if len(boxes) > 0:
                 iou = torch.diag(boxIoU(boxCxcywh2Xyxy(boxes), boxCxcywh2Xyxy(targetBoxes))[0])
 
-                # Compute original mAP metrics
                 iou_th = [50, 75, 95]
                 map_th = []
                 ap = []
@@ -79,31 +78,51 @@ class SetCriterion(nn.Module):
                         map_th.append(ap_th)
                 ap = torch.mean(torch.stack(ap))
 
-                # Compute per-class mAP
+                # Compute per-class AP including mAP_50, 75, 95
                 per_class_ap = {}
+                per_class_ap_50 = {}
+                per_class_ap_75 = {}
+                per_class_ap_95 = {}
+
                 for c in range(self.numClass):
                     class_mask = (targetClassO == c) & mask
                     num_class_instances = class_mask.sum().item()
                     if num_class_instances == 0:
                         per_class_ap[c] = torch.tensor(0.0, device=logits.device)
+                        per_class_ap_50[c] = torch.tensor(0.0, device=logits.device)
+                        per_class_ap_75[c] = torch.tensor(0.0, device=logits.device)
+                        per_class_ap_95[c] = torch.tensor(0.0, device=logits.device)
                         continue
 
                     class_iou = iou[class_mask]
                     class_pred_correct = (predClass[class_mask] == c)
 
                     ap_values = []
+                    ap_50, ap_75, ap_95 = 0, 0, 0
                     for threshold in range(50, 100, 5):
                         th = threshold / 100
                         tp = ((class_iou >= th) & class_pred_correct).sum().float()
                         ap_val = tp / num_class_instances
                         ap_values.append(ap_val)
+                        if threshold == 50:
+                            ap_50 = ap_val
+                        elif threshold == 75:
+                            ap_75 = ap_val
+                        elif threshold == 95:
+                            ap_95 = ap_val
 
                     ap_mean = torch.mean(torch.stack(ap_values)) if ap_values else torch.tensor(0.0)
                     per_class_ap[c] = ap_mean
+                    per_class_ap_50[c] = ap_50
+                    per_class_ap_75[c] = ap_75
+                    per_class_ap_95[c] = ap_95
             else:
                 ap = torch.tensor(0.0, device=logits.device)
                 map_th = [torch.tensor(0.0, device=logits.device) for _ in range(3)]
                 per_class_ap = {c: torch.tensor(0.0, device=logits.device) for c in range(self.numClass)}
+                per_class_ap_50 = per_class_ap.copy()
+                per_class_ap_75 = per_class_ap.copy()
+                per_class_ap_95 = per_class_ap.copy()
 
         self.debug_counter += 1
 
@@ -118,9 +137,12 @@ class SetCriterion(nn.Module):
             'mAP_95': map_th[2]
         }
 
-        # Add per-class mAP metrics
-        for c, ap_val in per_class_ap.items():
-            metrics[f'mAP_class_{c}'] = ap_val
+        # Add per-class AP metrics
+        for c in range(self.numClass):
+            metrics[f'AP_class_{c}'] = per_class_ap[c]
+            metrics[f'AP_class_{c}_50'] = per_class_ap_50[c]
+            metrics[f'AP_class_{c}_75'] = per_class_ap_75[c]
+            metrics[f'AP_class_{c}_95'] = per_class_ap_95[c]
 
         return metrics
 
