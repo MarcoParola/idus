@@ -27,7 +27,7 @@ weight: ""
 # MARK: - training config
 lr: 1e-4
 lrBackbone: 1e-5
-batchSize: 1
+batchSize: 8
 weightDecay: 1e-4
 epochs: 100
 lrDrop: 50

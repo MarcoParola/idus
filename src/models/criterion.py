@@ -143,20 +143,21 @@ class APCalculator:
 
 
 class SetCriterion(nn.Module):
-    def __init__(self, args):
+    def __init__(self, args, train_mode = True):
         super(SetCriterion, self).__init__()
         self.matcher = HungarianMatcher(args.classCost, args.bboxCost, args.giouCost)
         self.numClass = args.numClass
         self.classCost = args.classCost
         self.bboxCost = args.bboxCost
         self.giouCost = args.giouCost
+        self.train_mode = train_mode
 
         emptyWeight = torch.ones(args.numClass + 1)
         emptyWeight[-1] = args.eosCost
         self.register_buffer('emptyWeight', emptyWeight)
 
         # Initialize AP calculator with the same device as the model
-        self.ap_calculator = None  # Will be initialized in forward pass
+        self.ap_calculator = None if self.train_mode else APCalculator(self.numClass, args.device)
         self.step_counter = 0
 
     def forward(self, x: Dict[str, Tensor], y: List[Dict[str, Tensor]]) -> Dict[str, Tensor]:
@@ -178,7 +179,6 @@ class SetCriterion(nn.Module):
         ids = self.matcher(x, y)
         idx = self.getPermutationIdx(ids)
 
-        # Classification loss computation
         logits = x['class']
         targetClassO = torch.cat([t['labels'] for t, (_, J) in zip(y, ids)])
         targetClass = torch.full(logits.shape[:2], self.numClass, dtype=torch.int64, device=logits.device)
@@ -187,13 +187,11 @@ class SetCriterion(nn.Module):
         classificationLoss = nn.functional.cross_entropy(logits.transpose(1, 2), targetClass, self.emptyWeight)
         classificationLoss *= self.classCost
 
-        # Box loss computation
         mask = targetClassO != self.numClass
         boxes = x['bbox'][idx][mask]
         targetBoxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(y, ids)], 0)[mask]
 
         numBoxes = len(targetBoxes) + 1e-6
-
         bboxLoss = nn.functional.l1_loss(boxes, targetBoxes, reduction='none')
         bboxLoss = bboxLoss.sum() / numBoxes
         bboxLoss *= self.bboxCost
@@ -216,36 +214,21 @@ class SetCriterion(nn.Module):
             if len(boxes) > 0:
                 ious = torch.diag(boxIoU(boxCxcywh2Xyxy(boxes), boxCxcywh2Xyxy(targetBoxes))[0])
 
-                # Debug print every 100 steps
                 if self.step_counter % 100 == 0:
-                    print(
-                        f"[Step {self.step_counter}] Losses: Class={classificationLoss.item():.4f}, BBox={bboxLoss.item():.4f}, gIoU={giouLoss.item():.4f}")
-                    print(f"Pred: {predClass.tolist()} | Target: {targetClassO.tolist()}")
-                    print(f"Confidences: {confidences.tolist()} | IoUs: {ious.tolist()}")
+                    print(f"[Step {self.step_counter}] Losses: Class={classificationLoss.item():.4f}, "
+                          f"BBox={bboxLoss.item():.4f}, gIoU={giouLoss.item():.4f}")
 
                 self.step_counter += 1
 
-                # Update AP calculator with batch statistics
-                self.ap_calculator.update(
-                    predClass[mask],
-                    targetClassO[mask],
-                    confidences[mask],
-                    ious
-                )
-
-                # Calculate all metrics at once using the new compute_metrics method
-                ap_metrics = self.ap_calculator.compute_metrics()
-                metrics.update(ap_metrics)
-
-            else:
-                # Create empty metrics when there are no valid boxes
-                metrics['mAP'] = torch.tensor(0.0, device=logits.device)
-                for threshold in [50, 75, 95]:
-                    metrics[f'mAP_{threshold}'] = torch.tensor(0.0, device=logits.device)
-                    for c in range(self.numClass):
-                        metrics[f'AP_class_{c}_{threshold}'] = torch.tensor(0.0, device=logits.device)
-                for c in range(self.numClass):
-                    metrics[f'AP_class_{c}'] = torch.tensor(0.0, device=logits.device)
+                if not self.train_mode:  # Only compute AP metrics in test mode
+                    self.ap_calculator.update(
+                        predClass[mask],
+                        targetClassO[mask],
+                        confidences[mask],
+                        ious
+                    )
+                    ap_metrics = self.ap_calculator.compute_metrics()
+                    metrics.update(ap_metrics)
 
         return metrics
 
