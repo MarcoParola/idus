@@ -92,7 +92,7 @@ class TestOxfordPetDataset(unittest.TestCase):
 
     def test_visualization(self):
         # Test visualization with class labels (temporary output in memory)
-        for i in range(2):  # Test visualization for 2 samples
+        for i in range(2):
             image, targets = self.test[i]
             image = ToPILImage()(image)
             image = np.array(image)
@@ -121,7 +121,7 @@ class TestOxfordPetDataset(unittest.TestCase):
         # Ensure bounding boxes are still within image bounds after transformation
         for i in range(5):
             image, targets = self.test[i]
-            boxes = targets['boxes'] * 128  # Scale back to image size
+            boxes = targets['boxes'] * 128
             for bbox in boxes:
                 x, y, w, h = bbox
                 self.assertTrue(0 <= x <= 128, "Bounding box x-coordinate should be within image bounds")
