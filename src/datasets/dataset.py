@@ -2,9 +2,8 @@ from typing import Tuple, List, Dict
 
 import torch
 from torch import Tensor
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 import numpy as np
-from torchvision.transforms import transforms
 
 
 class DetectionDataset(Dataset):
@@ -22,6 +21,8 @@ class DetectionDataset(Dataset):
 
 
 def load_datasets(args):
+    import torchvision.transforms as transforms
+
     train, val, test = None, None, None
 
     if args.dataset == "oxford-pet":
@@ -30,7 +31,7 @@ def load_datasets(args):
         transform = transforms.Compose([
             transforms.Resize((128, 128)),
             transforms.ToTensor(),
-            transforms.Lambda(remove_alpha_channel),
+            transforms.Lambda(remove_alpha_channel),  # Use the global function
         ])
 
         train, val, test = load_oxford_dataset(resize=128, transform=transform)

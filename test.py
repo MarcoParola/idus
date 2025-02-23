@@ -35,13 +35,13 @@ def main(args):
     train_dataset, val_dataset, test_dataset = load_datasets(args)
 
     test_dataloader = DataLoader(test_dataset,
-                                 batch_size=8,
+                                 batch_size=32,
                                  shuffle=False,
                                  collate_fn=collateFunction,
                                  num_workers=args.numWorkers)
 
     # Load model
-    criterion = SetCriterion(args, train_mode = False).to(device)
+    criterion = SetCriterion(args, train_mode=False).to(device)
     model = load_model(args).to(device)
 
     if args.multi:
