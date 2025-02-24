@@ -41,7 +41,7 @@ def main(args):
                                  num_workers=args.numWorkers)
 
     # Load model
-    criterion = SetCriterion(args, train_mode=False).to(device)
+    criterion = SetCriterion(args).to(device)
     model = load_model(args).to(device)
 
     if args.multi:

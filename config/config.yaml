@@ -27,17 +27,17 @@ weight: ""
 # MARK: - training config
 lr: 1e-4
 lrBackbone: 1e-5
-batchSize: 8
+batchSize: 32
 weightDecay: 1e-4
 epochs: 100
 lrDrop: 50
-clipMaxNorm: .1
+clipMaxNorm: .5
 patience: 15
 
 # MARK: - loss
-classCost: 1
-bboxCost: .2
-giouCost: .2
+classCost: .5
+bboxCost: 1
+giouCost: 1
 eosCost: 0
 
 # MARK: - dataset

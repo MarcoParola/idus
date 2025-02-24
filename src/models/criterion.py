@@ -1,10 +1,9 @@
+from src.models.matcher import HungarianMatcher
+from src.utils.boxOps import boxCxcywh2Xyxy, gIoU, boxIoU
+
 from typing import Dict, List, Tuple
 import torch
 from torch import nn, Tensor
-from collections import defaultdict
-
-from src.models.matcher import HungarianMatcher
-from src.utils.boxOps import boxCxcywh2Xyxy, gIoU, boxIoU
 
 
 class APCalculator:
@@ -88,8 +87,8 @@ class APCalculator:
 
         return ap
 
-    def compute_metrics(self, include_per_class=False):
-        """Compute AP metrics, optionally including per-class metrics"""
+    def compute_metrics(self):
+        """Compute AP metrics for all classes and thresholds"""
         metrics = {}
 
         # Initialize tensors for storing APs
@@ -102,20 +101,19 @@ class APCalculator:
             class_aps[class_id, 1] = self.compute_ap(class_id, 0.75)  # AP@75
             class_aps[class_id, 2] = self.compute_ap(class_id, 0.95)  # AP@95
 
-            if include_per_class:
-                # Compute mean AP across thresholds for this class
-                thresholds = torch.arange(50, 100, 5, device=self.device) / 100
-                class_ap_mean = torch.mean(torch.stack([
-                    self.compute_ap(class_id, th) for th in thresholds
-                ]))
-                metrics[f'AP_class_{class_id}'] = class_ap_mean
+            # Compute mean AP across thresholds for this class
+            thresholds = torch.arange(50, 100, 5, device=self.device) / 100
+            class_ap_mean = torch.mean(torch.stack([
+                self.compute_ap(class_id, th) for th in thresholds
+            ]))
+            metrics[f'AP_class_{class_id}'] = class_ap_mean
 
-                # Store individual threshold APs
-                metrics[f'AP_class_{class_id}_50'] = class_aps[class_id, 0]
-                metrics[f'AP_class_{class_id}_75'] = class_aps[class_id, 1]
-                metrics[f'AP_class_{class_id}_95'] = class_aps[class_id, 2]
+            # Store individual threshold APs
+            metrics[f'AP_class_{class_id}_50'] = class_aps[class_id, 0]
+            metrics[f'AP_class_{class_id}_75'] = class_aps[class_id, 1]
+            metrics[f'AP_class_{class_id}_95'] = class_aps[class_id, 2]
 
-        # Always compute mAP metrics
+        # Compute mAP metrics
         metrics['mAP_50'] = class_aps[:, 0].mean()
         metrics['mAP_75'] = class_aps[:, 1].mean()
         metrics['mAP_95'] = class_aps[:, 2].mean()
@@ -132,27 +130,40 @@ class APCalculator:
 
         return metrics
 
+    def _create_empty_metrics(self):
+        """Create zero-filled metrics when there are no predictions"""
+        metrics = {'mAP': torch.tensor(0.0, device=self.device)}
+        for threshold in [50, 75, 95]:
+            metrics[f'mAP_{threshold}'] = torch.tensor(0.0, device=self.device)
+            for c in range(self.num_classes):
+                metrics[f'AP_class_{c}_{threshold}'] = torch.tensor(0.0, device=self.device)
+        for c in range(self.num_classes):
+            metrics[f'AP_class_{c}'] = torch.tensor(0.0, device=self.device)
+        return metrics
+
 
 class SetCriterion(nn.Module):
-    def __init__(self, args, train_mode=True):
+    def __init__(self, args):
         super(SetCriterion, self).__init__()
         self.matcher = HungarianMatcher(args.classCost, args.bboxCost, args.giouCost)
         self.numClass = args.numClass
         self.classCost = args.classCost
         self.bboxCost = args.bboxCost
         self.giouCost = args.giouCost
-        self.train_mode = train_mode
 
         emptyWeight = torch.ones(args.numClass + 1)
         emptyWeight[-1] = args.eosCost
         self.register_buffer('emptyWeight', emptyWeight)
 
-        # Initialize AP calculator for both training and testing
-        self.ap_calculator = APCalculator(self.numClass, args.device)
+        # Initialize AP calculator with the same device as the model
+        self.ap_calculator = None  # Will be initialized in forward pass
         self.step_counter = 0
 
-
     def forward(self, x: Dict[str, Tensor], y: List[Dict[str, Tensor]]) -> Dict[str, Tensor]:
+        # Initialize AP calculator if not done yet
+        if self.ap_calculator is None:
+            self.ap_calculator = APCalculator(self.numClass, x['class'].device)
+
         ans = self.computeLoss(x, y)
 
         for i, aux in enumerate(x['aux']):
@@ -167,6 +178,7 @@ class SetCriterion(nn.Module):
         ids = self.matcher(x, y)
         idx = self.getPermutationIdx(ids)
 
+        # Classification loss computation
         logits = x['class']
         targetClassO = torch.cat([t['labels'] for t, (_, J) in zip(y, ids)])
         targetClass = torch.full(logits.shape[:2], self.numClass, dtype=torch.int64, device=logits.device)
@@ -175,11 +187,13 @@ class SetCriterion(nn.Module):
         classificationLoss = nn.functional.cross_entropy(logits.transpose(1, 2), targetClass, self.emptyWeight)
         classificationLoss *= self.classCost
 
+        # Box loss computation
         mask = targetClassO != self.numClass
         boxes = x['bbox'][idx][mask]
         targetBoxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(y, ids)], 0)[mask]
 
         numBoxes = len(targetBoxes) + 1e-6
+
         bboxLoss = nn.functional.l1_loss(boxes, targetBoxes, reduction='none')
         bboxLoss = bboxLoss.sum() / numBoxes
         bboxLoss *= self.bboxCost
@@ -202,13 +216,16 @@ class SetCriterion(nn.Module):
             if len(boxes) > 0:
                 ious = torch.diag(boxIoU(boxCxcywh2Xyxy(boxes), boxCxcywh2Xyxy(targetBoxes))[0])
 
+                # Debug print every 100 steps
                 if self.step_counter % 100 == 0:
-                    print(f"[Step {self.step_counter}] Losses: Class={classificationLoss.item():.4f}, "
-                          f"BBox={bboxLoss.item():.4f}, gIoU={giouLoss.item():.4f}")
+                    print(
+                        f"[Step {self.step_counter}] Losses: Class={classificationLoss.item():.4f}, BBox={bboxLoss.item():.4f}, gIoU={giouLoss.item():.4f}")
+                    print(f"Pred: {predClass.tolist()} | Target: {targetClassO.tolist()}")
+                    print(f"Confidences: {confidences.tolist()} | IoUs: {ious.tolist()}")
 
                 self.step_counter += 1
 
-                # Update AP calculator in both training and testing modes
+                # Update AP calculator with batch statistics
                 self.ap_calculator.update(
                     predClass[mask],
                     targetClassO[mask],
@@ -216,9 +233,19 @@ class SetCriterion(nn.Module):
                     ious
                 )
 
-                # Compute metrics with per-class AP only in test mode
-                ap_metrics = self.ap_calculator.compute_metrics(include_per_class=not self.train_mode)
+                # Calculate all metrics at once using the new compute_metrics method
+                ap_metrics = self.ap_calculator.compute_metrics()
                 metrics.update(ap_metrics)
+
+            else:
+                # Create empty metrics when there are no valid boxes
+                metrics['mAP'] = torch.tensor(0.0, device=logits.device)
+                for threshold in [50, 75, 95]:
+                    metrics[f'mAP_{threshold}'] = torch.tensor(0.0, device=logits.device)
+                    for c in range(self.numClass):
+                        metrics[f'AP_class_{c}_{threshold}'] = torch.tensor(0.0, device=logits.device)
+                for c in range(self.numClass):
+                    metrics[f'AP_class_{c}'] = torch.tensor(0.0, device=logits.device)
 
         return metrics
 
