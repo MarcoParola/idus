@@ -2,7 +2,7 @@
 detr:
   dummy: False
   transformerName: tiny
-  numQuery: 50
+  numQuery: 400
   numBlocks:
     - 6
     - 6
