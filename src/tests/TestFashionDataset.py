@@ -146,9 +146,8 @@ class TestFashionDataset(unittest.TestCase):
 
     def test_transforms(self):
         # Test that transforms are properly applied
-        original_transform = self.transform
         special_transform = T.Compose([
-            T.Resize((64, 64)),  # Different size to test resize
+            T.Resize((64, 64)),
             T.ToTensor(),
         ])
 

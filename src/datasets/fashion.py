@@ -11,10 +11,10 @@ def load_fashion_dataset(resize=128, transform=None):
     """Load the Fashion-MNIST dataset directly from torchvision"""
     # Download training data
     train_data = FashionMNIST(
-        root='./data',  # This is temporary, data will be downloaded here and can be deleted
+        root='./data',
         train=True,
         download=True,
-        transform=None  # We'll handle transforms in our custom dataset
+        transform=None
     )
 
     # Download test data
@@ -36,8 +36,8 @@ def load_fashion_dataset(resize=128, transform=None):
     ])
 
     # Split indices for train/val/test
-    train_classes = list(range(7))  # First 7 classes for training
-    test_classes = list(range(7, 10))  # Last 3 classes for testing
+    train_classes = list(range(7))
+    test_classes = list(range(7, 10))
 
     train_indices = np.nonzero(np.in1d(all_labels, train_classes))[0]
     np.random.shuffle(train_indices)
@@ -74,7 +74,7 @@ class FashionDataset(DetectionDataset):
 
     def __init__(self, images, labels, resize=128, transform=None):
         super().__init__()
-        self.images = images  # Already in shape (N, 28, 28)
+        self.images = images
         self.labels = labels
         self.resize = resize
         self.transforms = transform
@@ -93,7 +93,7 @@ class FashionDataset(DetectionDataset):
         image = Image.fromarray(self.images[idx].astype(np.uint8))
 
         # Calculate bbox (entire image for single object)
-        bbox = [0, 0, 1, 1]  # Normalized coordinates
+        bbox = [0, 0, 1, 1]
 
         if self.transforms is not None:
             image = self.transforms(image)

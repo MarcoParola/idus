@@ -14,10 +14,9 @@ def load_oxford_superclass_dataset(resize=224, transform=None):
     """
     dataset = load_dataset("visual-layer/oxford-iiit-pet-vl-enriched")
     print(dataset)
-    # create validation set from train
+
     train_valid_split = dataset['train'].train_test_split(test_size=0.1)
 
-    # Access the new train and validation sets
     train = train_valid_split['train']
     val = train_valid_split['test']
     test = dataset['test']
@@ -51,12 +50,10 @@ class OxfordPetSuperclassDataset(DetectionDataset):
         self.breed_to_superclass = {}
         for i, breed in enumerate(hf_dataset.unique('label_breed')):
             # Extract superclass information from metadata or name
-            # Assuming first 12 breeds are dogs, rest are cats
-            # You might need to adjust this logic based on your actual data
             if 'cat' in breed.lower() or i >= 12:
-                self.breed_to_superclass[breed] = 0  # cat index
+                self.breed_to_superclass[breed] = 0
             else:
-                self.breed_to_superclass[breed] = 1  # dog index
+                self.breed_to_superclass[breed] = 1
 
         def has_cat_or_dog(sample):
             if sample['label_bbox_enriched'] is None:

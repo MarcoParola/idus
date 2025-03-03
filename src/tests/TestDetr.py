@@ -17,7 +17,7 @@ class TestDetr(unittest.TestCase):
         def get_config(cfg: DictConfig):
             cls.cfg = cfg
             cls.model = DETR(cls.cfg)
-            cls.model.eval()  # Ensure model is in eval mode
+            cls.model.eval()
             cls.post_process = PostProcess()
 
         get_config()

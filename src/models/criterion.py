@@ -29,7 +29,7 @@ class APCalculator:
         confidences = confidences.to(self.device)
         ious = ious.to(self.device)
 
-        # Safety check to ensure all tensors have compatible sizes
+        # Safety check to ensure all tensors have compatible sizes (had problems)
         if len(pred_classes) != len(target_classes) or len(pred_classes) != len(confidences) or len(
                 pred_classes) != len(ious):
             print(f"Warning: Mismatched tensor sizes - pred_classes: {pred_classes.shape}, "
@@ -44,7 +44,8 @@ class APCalculator:
         # Update ground truth counts
         unique_classes, class_counts = torch.unique(target_classes, return_counts=True)
         for cls, count in zip(unique_classes, class_counts):
-            if cls != self.num_classes:  # Ignore background class
+            # Ignore background class
+            if cls != self.num_classes:
                 self.gt_counts[cls] += count
 
         # Store predictions as tensors
@@ -52,7 +53,7 @@ class APCalculator:
         self.predictions['class_ids'].append(pred_classes[mask])
         self.predictions['confidences'].append(confidences[mask])
         self.predictions['is_correct'].append(pred_classes[mask] == target_classes[mask])
-        self.predictions['ious'].append(ious[mask])  # Make sure ious is filtered by the same mask
+        self.predictions['ious'].append(ious[mask])
 
     def compute_ap(self, class_id, threshold):
         """Compute AP for a specific class and IoU threshold"""
@@ -79,7 +80,7 @@ class APCalculator:
 
             class_confidences = confidences[class_mask]
             class_is_correct = is_correct[class_mask]
-            class_ious = ious[class_mask]  # This is where the error was occurring
+            class_ious = ious[class_mask]
 
             # Sort by confidence
             sorted_indices = torch.argsort(class_confidences, descending=True)
@@ -183,13 +184,12 @@ class SetCriterion(nn.Module):
         emptyWeight[-1] = args.eosCost
         self.register_buffer('emptyWeight', emptyWeight)
 
-        # Initialize AP calculator with the same device as the model
-        self.ap_calculator = None  # Will be initialized in forward pass
+        self.ap_calculator = None
         self.step_counter = 0
 
     def forward(self, x: Dict[str, Tensor], y: List[Dict[str, Tensor]]) -> Dict[str, Tensor]:
         try:
-            # Initialize AP calculator if not done yet
+            # Initialize AP calculator
             if self.ap_calculator is None:
                 self.ap_calculator = APCalculator(self.numClass, x['class'].device)
 
@@ -199,9 +199,9 @@ class SetCriterion(nn.Module):
                 try:
                     aux_losses = self.computeLoss(aux, y)
                     ans.update({f'{k}_aux{i}': v for k, v in aux_losses.items()})
+                # Skip this auxiliary loss if there's an error but continue training
                 except Exception as e:
                     print(f"Error computing auxiliary loss {i}: {str(e)}")
-                    # Skip this auxiliary loss if there's an error but continue training
 
             return ans
 
@@ -273,7 +273,7 @@ class SetCriterion(nn.Module):
                     self.step_counter += 1
 
                     try:
-                        # Make sure all tensors have the same size before updating AP calculator
+                        # Make sure all tensors have the same size before updating AP calculator (caused problems)
                         if len(predClass[mask]) == len(targetClassO[mask]) == len(confidences[mask]) == len(ious):
                             # Update AP calculator with batch statistics
                             self.ap_calculator.update(
@@ -283,7 +283,7 @@ class SetCriterion(nn.Module):
                                 ious
                             )
 
-                            # Calculate all metrics at once using the new compute_metrics method
+                            # Calculate all metrics at once using the compute_metrics method
                             ap_metrics = self.ap_calculator.compute_metrics()
                             metrics.update(ap_metrics)
                         else:
