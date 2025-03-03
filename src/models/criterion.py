@@ -187,6 +187,31 @@ class SetCriterion(nn.Module):
         self.ap_calculator = None
         self.step_counter = 0
 
+        self.confusion_matrix = None
+
+        self.device = args.device
+
+    def reset_confusion_matrix(self):
+        """Initialize or reset the confusion matrix"""
+
+        # Include background class in confusion matrix (+1)
+        self.confusion_matrix = torch.zeros((self.numClass + 1, self.numClass + 1), dtype=torch.long, device=self.device)
+
+    def update_confusion_matrix(self, pred_classes, target_classes):
+        """Update confusion matrix with batch predictions"""
+
+        if self.confusion_matrix is None:
+            self.reset_confusion_matrix()
+
+        for p, t in zip(pred_classes, target_classes):
+            self.confusion_matrix[p, t] += 1
+
+    def get_confusion_matrix(self):
+        """Return the current confusion matrix"""
+        if self.confusion_matrix is None:
+            self.reset_confusion_matrix()
+        return self.confusion_matrix.clone()
+
     def forward(self, x: Dict[str, Tensor], y: List[Dict[str, Tensor]]) -> Dict[str, Tensor]:
         try:
             # Initialize AP calculator
@@ -266,9 +291,14 @@ class SetCriterion(nn.Module):
                         print(
                             f"[Step {self.step_counter}] Losses: Class={classificationLoss.item():.4f}, BBox={bboxLoss.item():.4f}, gIoU={giouLoss.item():.4f}")
                         print(
-                            f"Pred: {predClass[:10].tolist()}... | Target: {targetClassO[:10].tolist()}...")  # Show first 10 for readability
+                            f"Pred: {predClass[:10].tolist()}... | Target: {targetClassO[:10].tolist()}...")
                         print(
-                            f"Confidences: {confidences[:10].tolist()}... | IoUs: {ious[:10].tolist()}...")  # Show first 10 for readability
+                            f"Confidences: {confidences[:10].tolist()}... | IoUs: {ious[:10].tolist()}...")
+
+                    # Update confusion matrix for both matched classes
+                    # Use detach to avoid tracking gradients
+                    if mask.any():
+                        self.update_confusion_matrix(predClass[mask].detach(), targetClassO[mask].detach())
 
                     self.step_counter += 1
 
