@@ -6,21 +6,6 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 import wandb
 import hydra
-<<<<<<< HEAD
-from tqdm import tqdm
-
-from src.models import SetCriterion
-from src.datasets import collateFunction, load_datasets
-from src.utils import load_model
-from src.utils import cast2Float
-from src.utils import EarlyStopping
-
-import torch.distributed as dist
-
-@hydra.main(config_path="config", config_name="config")
-def main(args):
-    print("Starting training...")   
-=======
 import gc
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -50,7 +35,6 @@ def log_confusion_matrix(conf_matrix, class_labels, step, prefix="train"):
 @hydra.main(config_path="config", config_name="config", version_base="1.3")
 def main(args):
     print("Starting training...")
->>>>>>> 9f0f794186df8fdd969e1664236269d695d01cea
 
     wandb.init(entity=args.wandbEntity, project=args.wandbProject, config=dict(args))
     torch.manual_seed(args.seed)
@@ -59,30 +43,41 @@ def main(args):
 
     # load data
     train_dataset, val_dataset, test_dataset = load_datasets(args)
-<<<<<<< HEAD
-    
-    train_dataloader = DataLoader(train_dataset, 
-        batch_size=args.batchSize, 
-        shuffle=True, 
-        collate_fn=collateFunction, 
-        num_workers=args.numWorkers)
-    
-    val_dataloader = DataLoader(val_dataset, 
-        batch_size=args.batchSize, 
-        shuffle=False, 
-        collate_fn=collateFunction,
-        num_workers=args.numWorkers)
 
-    test_dataloader = DataLoader(test_dataset, 
-        batch_size=1, 
-        shuffle=False, 
-        collate_fn=collateFunction,
-        num_workers=args.numWorkers)
     
+
     # set model and criterion, load weights if available
+    model = load_model(args).to(device)
     criterion = SetCriterion(args).to(device)
-    model = load_model(args).to(device)    
-=======
+
+    # recupero il forgetting set (che sarà nullo nel caso di original model training)
+    forgetting_set = args.unlearn.forgetting_set
+    unlearning_method = args.unlearn.method # TODO CHECK
+
+     if unlearning_method != 'golden': # 
+        # se non è golden, carico il modello originale per fare unlearning da ./checkpoints che è già in config outputDir
+        model.load_state_dict(torch.load(f"{args.outputDir}/best.pt"))
+
+    if unlearning_method == 'golden' or unlearning_method == 'finetuning': 
+        # TODO OnlyForgettingSet va definita, è una classe che fra da wrapping al dataset originale e filtra via il retaining set
+        train_dataset = OnlyForgettingSet(train_dataset, forgetting_set, removal=cr/ir) 
+
+    elif unlearning_method == 'randomrelabelling':
+        # il train_dataset non viene modificato
+        # modifico la loss che è una crossentropy che prende come argomento il forgetting set, così ogni volta che calcola la loss per i sample del forgetting set, genera una label random
+        # criterion = ....
+
+    elif unlearning_method == 'neggrad':
+        # TODO OnlyRetainingSet va definita, è una classe che fra da wrapping al dataset originale e filtra via il forgetting set
+        train_dataset = OnlyForgettingSet(train_dataset, forgetting_set, removal=cr/ir)
+        # criterion = .... -> loss negativa
+
+    elif unlearning_method == 'neggrad+':
+        # in questo caso il dataset rimane uguale (tutto)
+        # criterion = neggradplusloss -> calcola loss positiva su retaining set e negativa su forgetting set
+    
+    elif unlearning_method == 'ours':
+        # TODO
 
     train_dataloader = DataLoader(train_dataset,
                                   batch_size=args.batchSize,
@@ -102,25 +97,16 @@ def main(args):
                                  collate_fn=collateFunction,
                                  num_workers=args.numWorkers)
 
-    # set model and criterion, load weights if available
-    model = load_model(args).to(device)
-    criterion = SetCriterion(args).to(device)
-
     with torch.no_grad():
         # Set the background class bias to match DETR's initialization
         bias_value = -torch.log(torch.tensor((1 - 0.01) / 0.01))
         model.class_embed.layers[-1].bias.data[-1] = bias_value
->>>>>>> 9f0f794186df8fdd969e1664236269d695d01cea
 
     # separate learning rate
     paramDicts = [
         {"params": [p for n, p in model.named_parameters() if "backbone" not in n and p.requires_grad]},
         {"params": [p for n, p in model.named_parameters() if "backbone" in n and p.requires_grad],
-<<<<<<< HEAD
-            "lr": args.lrBackbone,},
-=======
          "lr": args.lrBackbone, },
->>>>>>> 9f0f794186df8fdd969e1664236269d695d01cea
     ]
 
     early_stopping = EarlyStopping(patience=args.patience)
@@ -132,12 +118,6 @@ def main(args):
     criterion.train()
 
     for epoch in range(args.epochs):
-<<<<<<< HEAD
-        wandb.log({"epoch": epoch}, step=epoch * batches)
-        total_loss = 0.0
-        total_metrics = None  # Initialize total_metrics
-        
-=======
         # Reset confusion matrix at the start of each epoch
         criterion.reset_confusion_matrix()
 
@@ -145,7 +125,6 @@ def main(args):
         total_loss = 0.0
         total_metrics = None  # Initialize total_metrics
 
->>>>>>> 9f0f794186df8fdd969e1664236269d695d01cea
         # MARK: - training
         for batch, (imgs, targets) in enumerate(tqdm(train_dataloader)):
             imgs = imgs.to(device)
@@ -158,20 +137,11 @@ def main(args):
             if args.amp:
                 with amp.autocast():
                     out = model(imgs)
-<<<<<<< HEAD
-                out = cast2Float(out) # cast output to float to overcome amp training issue
-=======
                 out = cast2Float(out)
->>>>>>> 9f0f794186df8fdd969e1664236269d695d01cea
             else:
                 out = model(imgs)
 
             metrics = criterion(out, targets)
-<<<<<<< HEAD
-            
-=======
-
->>>>>>> 9f0f794186df8fdd969e1664236269d695d01cea
             # Initialize total_metrics on the first batch
             if total_metrics is None:
                 total_metrics = {k: 0.0 for k in metrics}
@@ -202,8 +172,6 @@ def main(args):
         avg_loss = total_loss / len(train_dataloader)
         avg_metrics = {k: v / len(train_dataloader) for k, v in total_metrics.items()}
 
-<<<<<<< HEAD
-=======
         # Get and log confusion matrix at the end of the epoch
         conf_matrix = criterion.get_confusion_matrix().cpu().numpy()
 
@@ -230,20 +198,11 @@ def main(args):
         except Exception as e:
             print(f"Error logging confusion matrix with wandb.plot: {e}")
 
->>>>>>> 9f0f794186df8fdd969e1664236269d695d01cea
         wandb.log({"train/loss": avg_loss}, step=epoch * batches)
         print(f'Epoch {epoch}, loss: {avg_loss:.8f}')
 
         for k, v in avg_metrics.items():
             wandb.log({f"train/{k}": v}, step=epoch * batches)
-<<<<<<< HEAD
-        
-
-        
-        # MARK: - validation
-        model.eval()
-        criterion.eval()
-=======
 
         # MARK: - validation
         model.eval()
@@ -251,7 +210,6 @@ def main(args):
         # Reset confusion matrix for validation
         criterion.reset_confusion_matrix()
 
->>>>>>> 9f0f794186df8fdd969e1664236269d695d01cea
         with torch.no_grad():
             valMetrics = []
             losses = []
@@ -265,14 +223,6 @@ def main(args):
                 loss = sum(v for k, v in metrics.items() if 'loss' in k)
                 losses.append(loss.cpu().item())
 
-<<<<<<< HEAD
-            valMetrics = {k: torch.stack([m[k] for m in valMetrics]).mean() for k in valMetrics[0]}
-            avgLoss = np.mean(losses)
-            wandb.log({"val/loss": avgLoss}, step=epoch * batches)
-            for k,v in valMetrics.items():
-                wandb.log({f"val/{k}": v.item()}, step= epoch * batches)
-        
-=======
             # Get validation confusion matrix
             val_conf_matrix = criterion.get_confusion_matrix().cpu().numpy()
 
@@ -297,7 +247,6 @@ def main(args):
             wandb.log({"val/loss": avgLoss}, step=epoch * batches)
             for k, v in valMetrics.items():
                 wandb.log({f"val/{k}": v.item()}, step=epoch * batches)
->>>>>>> 9f0f794186df8fdd969e1664236269d695d01cea
 
         # check if the model is estrnn-yolos, if so, predict the first 10 images of the val set
         if args.model == 'estrnn-yolos':
@@ -314,29 +263,17 @@ def main(args):
                 pred = pred.squeeze().detach().cpu().numpy()
                 enhanced_img = img + pred
 
-<<<<<<< HEAD
-                # save both original and predicted images 
-=======
                 # save both original and predicted images
->>>>>>> 9f0f794186df8fdd969e1664236269d695d01cea
                 from skimage.io import imsave
 
                 # scale the image to 0-1
                 enhanced_img = (enhanced_img - enhanced_img.min()) / (enhanced_img.max() - enhanced_img.min())
                 img = (img - img.min()) / (img.max() - img.min())
-<<<<<<< HEAD
-                # convert to 0-255 
-=======
                 # convert to 0-255
->>>>>>> 9f0f794186df8fdd969e1664236269d695d01cea
                 enhanced_img = (enhanced_img * 255).astype(np.uint8)
                 img = (img * 255).astype(np.uint8)
                 imsave(f"{wandb.run.dir}/val_epoch{epoch}_img_{_i}.png", enhanced_img)
                 imsave(f"{wandb.run.dir}/val_img_{_i}_original.png", img)
-<<<<<<< HEAD
-                
-=======
->>>>>>> 9f0f794186df8fdd969e1664236269d695d01cea
 
         model.train()
         criterion.train()
@@ -345,11 +282,7 @@ def main(args):
         if avgLoss < prevBestLoss:
             print('[+] Loss improved from {:.8f} to {:.8f}, saving model...'.format(prevBestLoss, avgLoss))
             torch.save(model.state_dict(), f'{wandb.run.dir}/best.pt')
-<<<<<<< HEAD
-            wandb.save(f'{wandb.run.dir}/best.pt')
-=======
             # wandb.save(f'{wandb.run.dir}/best.pt')
->>>>>>> 9f0f794186df8fdd969e1664236269d695d01cea
             prevBestLoss = avgLoss
 
         # MARK: - early stopping
@@ -357,20 +290,12 @@ def main(args):
             print('[+] Early stopping at epoch {}'.format(epoch))
             break
 
-<<<<<<< HEAD
-
-    
-
-    model.eval()
-    criterion.eval()
-=======
     # MARK: - testing
     model.eval()
     criterion.eval()
     # Reset confusion matrix for testing
     criterion.reset_confusion_matrix()
 
->>>>>>> 9f0f794186df8fdd969e1664236269d695d01cea
     with torch.no_grad():
         valMetrics = []
         losses = []
@@ -384,20 +309,6 @@ def main(args):
             loss = sum(v for k, v in metrics.items() if 'loss' in k)
             losses.append(loss.cpu().item())
 
-<<<<<<< HEAD
-        valMetrics = {k: torch.stack([m[k] for m in valMetrics]).mean() for k in valMetrics[0]}
-        avgLoss = np.mean(losses)
-        wandb.log({"test/loss": avgLoss}, step=epoch * batches)
-        for k,v in valMetrics.items():
-            wandb.log({f"test/{k}": v.item()}, step=batch + epoch * batches)
-
-    wandb.finish()
-
-        
-
-if __name__ == '__main__':
-    main()
-=======
         # Get test confusion matrix
         test_conf_matrix = criterion.get_confusion_matrix().cpu().numpy()
 
@@ -429,4 +340,3 @@ if __name__ == '__main__':
 
 if __name__ == '__main__':
     main()
->>>>>>> 9f0f794186df8fdd969e1664236269d695d01cea
