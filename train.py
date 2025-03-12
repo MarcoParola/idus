@@ -8,12 +8,28 @@ import wandb
 import hydra
 import gc
 from tqdm import tqdm
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 from src.datasets.dataset import collateFunction, load_datasets
 from src.models import SetCriterion
 from src.utils.utils import load_model
 from src.utils import cast2Float
 from src.utils import EarlyStopping
+
+
+def log_confusion_matrix(conf_matrix, class_labels, step, prefix="train"):
+    """Helper function to create and log confusion matrix visualizations."""
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues',
+                xticklabels=class_labels, yticklabels=class_labels)
+    plt.xlabel('Predicted')
+    plt.ylabel('True')
+    plt.title(f'{prefix.capitalize()} Confusion Matrix')
+
+    # Log the figure as an image
+    wandb.log({f"{prefix}/confusion_matrix_heatmap": wandb.Image(plt)}, step=step)
+    plt.close()
 
 
 @hydra.main(config_path="config", config_name="config", version_base="1.3")
@@ -47,13 +63,13 @@ def main(args):
                                  num_workers=args.numWorkers)
 
     # set model and criterion, load weights if available
-    criterion = SetCriterion(args).to(device)
     model = load_model(args).to(device)
+    criterion = SetCriterion(args).to(device)
 
     with torch.no_grad():
         # Set the background class bias to match DETR's initialization
-        bias_value = -torch.log(torch.tensor((1 - 0.01) / 0.01))  # -ln(99) ≈ -4.595
-        model.class_embed.layers[-1].bias.data[-1] = bias_value  # Modify the last bias (background class)
+        bias_value = -torch.log(torch.tensor((1 - 0.01) / 0.01))
+        model.class_embed.layers[-1].bias.data[-1] = bias_value
 
     # separate learning rate
     paramDicts = [
@@ -71,6 +87,9 @@ def main(args):
     criterion.train()
 
     for epoch in range(args.epochs):
+        # Reset confusion matrix at the start of each epoch
+        criterion.reset_confusion_matrix()
+
         wandb.log({"epoch": epoch}, step=epoch * batches)
         total_loss = 0.0
         total_metrics = None  # Initialize total_metrics
@@ -87,7 +106,7 @@ def main(args):
             if args.amp:
                 with amp.autocast():
                     out = model(imgs)
-                out = cast2Float(out)  # cast output to float to overcome amp training issue
+                out = cast2Float(out)
             else:
                 out = model(imgs)
 
@@ -123,6 +142,32 @@ def main(args):
         avg_loss = total_loss / len(train_dataloader)
         avg_metrics = {k: v / len(train_dataloader) for k, v in total_metrics.items()}
 
+        # Get and log confusion matrix at the end of the epoch
+        conf_matrix = criterion.get_confusion_matrix().cpu().numpy()
+
+        # Create class labels for confusion matrix
+        class_labels = [f"class_{i}" for i in range(args.numClass)] + ["background"]
+
+        # Log confusion matrix using the helper function
+        log_confusion_matrix(conf_matrix, class_labels, epoch * batches, "train")
+
+        try:
+            # Get indices for true and predicted classes
+            true_classes = np.arange(len(class_labels))
+            pred_classes = np.arange(len(class_labels))
+
+            wandb.log({
+                "train/confusion_matrix": wandb.plot.confusion_matrix(
+                    probs=None,
+                    y_true=true_classes,
+                    preds=pred_classes,
+                    class_names=class_labels,
+                    title="Training Confusion Matrix"
+                )
+            }, step=epoch * batches)
+        except Exception as e:
+            print(f"Error logging confusion matrix with wandb.plot: {e}")
+
         wandb.log({"train/loss": avg_loss}, step=epoch * batches)
         print(f'Epoch {epoch}, loss: {avg_loss:.8f}')
 
@@ -132,6 +177,9 @@ def main(args):
         # MARK: - validation
         model.eval()
         criterion.eval()
+        # Reset confusion matrix for validation
+        criterion.reset_confusion_matrix()
+
         with torch.no_grad():
             valMetrics = []
             losses = []
@@ -144,6 +192,25 @@ def main(args):
                 valMetrics.append(metrics)
                 loss = sum(v for k, v in metrics.items() if 'loss' in k)
                 losses.append(loss.cpu().item())
+
+            # Get validation confusion matrix
+            val_conf_matrix = criterion.get_confusion_matrix().cpu().numpy()
+
+            # Log validation confusion matrix using the helper function
+            log_confusion_matrix(val_conf_matrix, class_labels, epoch * batches, "val")
+
+            try:
+                wandb.log({
+                    "val/confusion_matrix": wandb.plot.confusion_matrix(
+                        probs=None,
+                        y_true=true_classes,
+                        preds=pred_classes,
+                        class_names=class_labels,
+                        title="Validation Confusion Matrix"
+                    )
+                }, step=epoch * batches)
+            except Exception as e:
+                print(f"Error logging validation confusion matrix with wandb.plot: {e}")
 
             valMetrics = {k: torch.stack([m[k] for m in valMetrics]).mean() for k in valMetrics[0]}
             avgLoss = np.mean(losses)
@@ -185,7 +252,7 @@ def main(args):
         if avgLoss < prevBestLoss:
             print('[+] Loss improved from {:.8f} to {:.8f}, saving model...'.format(prevBestLoss, avgLoss))
             torch.save(model.state_dict(), f'{wandb.run.dir}/best.pt')
-            #wandb.save(f'{wandb.run.dir}/best.pt')
+            # wandb.save(f'{wandb.run.dir}/best.pt')
             prevBestLoss = avgLoss
 
         # MARK: - early stopping
@@ -193,8 +260,12 @@ def main(args):
             print('[+] Early stopping at epoch {}'.format(epoch))
             break
 
+    # MARK: - testing
     model.eval()
     criterion.eval()
+    # Reset confusion matrix for testing
+    criterion.reset_confusion_matrix()
+
     with torch.no_grad():
         valMetrics = []
         losses = []
@@ -208,11 +279,31 @@ def main(args):
             loss = sum(v for k, v in metrics.items() if 'loss' in k)
             losses.append(loss.cpu().item())
 
+        # Get test confusion matrix
+        test_conf_matrix = criterion.get_confusion_matrix().cpu().numpy()
+
+        # Log test confusion matrix using the helper function
+        log_confusion_matrix(test_conf_matrix, class_labels, epoch * batches, "test")
+
+        # Use wandb's built-in confusion matrix function if possible
+        try:
+            wandb.log({
+                "test/confusion_matrix": wandb.plot.confusion_matrix(
+                    probs=None,
+                    y_true=true_classes,
+                    preds=pred_classes,
+                    class_names=class_labels,
+                    title="Test Confusion Matrix"
+                )
+            }, step=epoch * batches)
+        except Exception as e:
+            print(f"Error logging test confusion matrix with wandb.plot: {e}")
+
         valMetrics = {k: torch.stack([m[k] for m in valMetrics]).mean() for k in valMetrics[0]}
         avgLoss = np.mean(losses)
         wandb.log({"test/loss": avgLoss}, step=epoch * batches)
         for k, v in valMetrics.items():
-            wandb.log({f"test/{k}": v.item()}, step=batch + epoch * batches)
+            wandb.log({f"test/{k}": v.item()}, step=epoch * batches)
 
     wandb.finish()
 

@@ -2,7 +2,6 @@ import unittest
 import numpy as np
 import torch
 import torchvision.transforms as T
-from torch.utils.data import DataLoader
 from torchvision.transforms import ToPILImage
 import matplotlib.pyplot as plt
 import tempfile
@@ -76,7 +75,7 @@ class TestOxfordPetDataset(unittest.TestCase):
 
     def test_annotations(self):
         # Test that the annotations are properly filtered and processed
-        for i in range(5):  # Test a few samples
+        for i in range(5):
             _, targets = self.test[i]
             boxes = targets['boxes']
             labels = targets['labels']
@@ -92,7 +91,7 @@ class TestOxfordPetDataset(unittest.TestCase):
 
     def test_visualization(self):
         # Test visualization with class labels (temporary output in memory)
-        for i in range(2):  # Test visualization for 2 samples
+        for i in range(2):
             image, targets = self.test[i]
             image = ToPILImage()(image)
             image = np.array(image)
@@ -121,14 +120,13 @@ class TestOxfordPetDataset(unittest.TestCase):
         # Ensure bounding boxes are still within image bounds after transformation
         for i in range(5):
             image, targets = self.test[i]
-            boxes = targets['boxes'] * 128  # Scale back to image size
+            boxes = targets['boxes'] * 128
             for bbox in boxes:
                 x, y, w, h = bbox
                 self.assertTrue(0 <= x <= 128, "Bounding box x-coordinate should be within image bounds")
                 self.assertTrue(0 <= y <= 128, "Bounding box y-coordinate should be within image bounds")
                 self.assertTrue(w >= 0, "Bounding box width should be non-negative")
                 self.assertTrue(h >= 0, "Bounding box height should be non-negative")
-
 
 if __name__ == "__main__":
     unittest.main()

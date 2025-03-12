@@ -31,10 +31,31 @@ def load_datasets(args):
         transform = transforms.Compose([
             transforms.Resize((128, 128)),
             transforms.ToTensor(),
-            transforms.Lambda(remove_alpha_channel),  # Use the global function
+            transforms.Lambda(remove_alpha_channel),
         ])
 
         train, val, test = load_oxford_dataset(resize=128, transform=transform)
+
+    elif args.dataset == "oxford-pet-superclass":
+        from src.datasets.oxford_pet_superclass import load_oxford_superclass_dataset
+
+        transform = transforms.Compose([
+            transforms.Resize((128, 128)),
+            transforms.ToTensor(),
+            transforms.Lambda(remove_alpha_channel),
+        ])
+
+        train, val, test = load_oxford_superclass_dataset(resize=128, transform=transform)
+
+    elif args.dataset == "fashion":
+        from src.datasets.fashion import load_fashion_dataset
+
+        transform = transforms.Compose([
+            transforms.Resize((128, 128)),
+            transforms.ToTensor(),
+        ])
+
+        train, val, test = load_fashion_dataset(resize=128, transform=transform)
 
     return train, val, test
 
