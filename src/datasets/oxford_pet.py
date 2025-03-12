@@ -1,13 +1,11 @@
 from datasets import load_dataset
 from typing import Tuple
 from torch import Tensor
-import torchvision
 import torch
 from PIL import Image
-from torchvision.transforms import ToPILImage, ToTensor
 import numpy as np
 
-from .dataset import DetectionDataset
+from src.datasets.dataset import DetectionDataset
 
 
 def load_oxford_dataset(resize=224, transform=None):
@@ -39,6 +37,7 @@ class OxfordPetDataset(DetectionDataset):
         __getitem__ returns a tuple of image and target (bbox and label) filtering out the other classes
     """
     def __init__(self, hf_dataset, resize=224, transform=None):
+        super().__init__()
         self.hf_dataset = hf_dataset
         self.resize = resize
         self.transforms = transform
@@ -60,14 +59,13 @@ class OxfordPetDataset(DetectionDataset):
         sample = self.hf_dataset.__getitem__(idx)
         image = sample['image']
         image = np.array(image)
-        print(image.shape)
 
         annotations = self.loadAnnotations(sample, image.shape[1]/self.resize, image.shape[0]/self.resize)
 
         if len(annotations) == 0:
             targets = {
                 'boxes': torch.zeros(1, 4, dtype=torch.float32),
-                'labels': torch.as_tensor([self.numClass], dtype=torch.int64),}
+                'labels': torch.as_tensor(len(self.classes), dtype=torch.int64),}
         else:
             targets = {
                 'boxes': torch.as_tensor(annotations[..., :-1], dtype=torch.float32),
@@ -82,7 +80,6 @@ class OxfordPetDataset(DetectionDataset):
 
 
     def loadAnnotations(self, sample, imgWidth: int, imgHeight: int) -> np.ndarray:
-        print(imgWidth, imgHeight)
         ans = []
         for annotation in sample['label_bbox_enriched']:
             if annotation['label'] not in ['cat', 'dog']:
@@ -90,79 +87,9 @@ class OxfordPetDataset(DetectionDataset):
             # get index of the class from self.classes
             cat = self.classes.index(sample['label_breed'])
             bbox = annotation['bbox']
-            print(bbox)
             bbox = [bbox[0]/imgWidth, bbox[1]/imgHeight, bbox[2]/imgWidth, bbox[3]/imgHeight]
-            print(bbox)
             ans.append(bbox + [cat])
-        
+
         return np.asarray(ans)
-
-
-if __name__ == "__main__":
-
-    transform = torchvision.transforms.Compose([
-        torchvision.transforms.Resize((128, 128)),
-        torchvision.transforms.ToTensor(),
-    ])
-
-    train, val, test = load_oxford_dataset(resize=128, transform=transform)
-
-    import numpy as np
-    import cv2
-    from PIL import Image
-    from torchvision.transforms import ToPILImage, ToTensor
-    import matplotlib.pyplot as plt
-    
-    for i in range(50):
-        image_dataset, target_dataset = test.__getitem__(i)
-        # plot
-        image = ToPILImage()(image_dataset)
-        image = np.array(image)
-        plt.imshow(image)
-
-        for bbox in target_dataset['boxes']:
-            x, y, w, h = bbox
-            x, y, w, h = x*128, y*128, w*128, h*128
-            # Draw the bounding box on the image using matplotlib
-            plt.plot([x, x + w, x + w, x, x], [y, y, y + h, y + h, y], color='r', linewidth=2)
-
-        plt.show()
-    
-
-    '''
-    for i in range(10):
-        tmp = test.__getitem__(i)
-        pippo = dataset_train.__getitem__(i)
-        print(tmp)       
-        print(type(tmp['image']))
-
-        image = tmp['image']
-        bboxes = tmp['label_bbox_enriched']
-        
-        image = ToTensor()(image)  # Convert to Tensor first
-        image = ToPILImage()(image)  
-        image = np.array(image)
-
-        image_train = pippo[0]
-        target_train = pippo[1]
-
-        # plot 2 images in subplots
-        fig, axs = plt.subplots(1, 2, figsize=(10, 5))
-        axs[0].imshow(image)
-        axs[0].set_title('Original image')
-        for bbox in bboxes:
-            x, y, w, h = bbox['bbox']
-            # Draw the bounding box on the image using matplotlib
-            axs[0].plot([x, x + w, x + w, x, x], [y, y, y + h, y + h, y], color='r', linewidth=2)
-
-        axs[1].imshow(image_train.permute(1, 2, 0))
-        axs[1].set_title('Transformed image')
-        for bbox in target_train['boxes']:
-            x, y, w, h = bbox
-            # Draw the bounding box on the image using matplotlib
-            axs[1].plot([x, x + w, x + w, x, x], [y, y, y + h, y + h, y], color='r', linewidth=2)
-            
-        plt.show()
-    '''
 
     

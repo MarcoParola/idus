@@ -1,17 +1,11 @@
 # MARK: - transformer
-model: null
-dummy: False
-hiddenDims: 512
-numHead: 8
-numEncoderLayer: 6
-numDecoderLayer: 6
-dimFeedForward: 2048
-dropout: .1
-numQuery: 80
-numClass: 4
-numBlocks:
-  - 6
-  - 6
-  - 6
-  - 6
-inChans: 1
+detr:
+  dummy: False
+  transformerName: small
+  numQuery: 100
+  numBlocks:
+    - 6
+    - 6
+    - 6
+    - 6
+

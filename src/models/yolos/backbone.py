@@ -81,7 +81,7 @@ class Block(nn.Module):
 class PatchEmbed(nn.Module):
     """ Image to Patch Embedding
     """
-    def __init__(self, img_size=224, patch_size=16, in_chans=3, embed_dim=768):
+    def __init__(self, img_size=224, patch_size=16, in_chans=2, embed_dim=768):
         super().__init__()
         img_size = to_2tuple(img_size)
         patch_size = to_2tuple(patch_size)
@@ -105,7 +105,7 @@ class HybridEmbed(nn.Module):
     """ CNN Feature Map Embedding
     Extract feature map from CNN, flatten, project to embedding dim.
     """
-    def __init__(self, backbone, img_size=224, feature_size=None, in_chans=3, embed_dim=768):
+    def __init__(self, backbone, img_size=224, feature_size=None, in_chans=2, embed_dim=768):
         super().__init__()
         assert isinstance(backbone, nn.Module)
         img_size = to_2tuple(img_size)
@@ -139,7 +139,7 @@ class HybridEmbed(nn.Module):
 class VisionTransformer(nn.Module):
     """ Vision Transformer with support for patch or hybrid CNN input stage
     """
-    def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
+    def __init__(self, img_size=224, patch_size=16, in_chans=2, num_classes=1000, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
                  drop_path_rate=0., hybrid_backbone=None, norm_layer=nn.LayerNorm, is_distill=False):
         super().__init__()
@@ -392,7 +392,7 @@ def _conv_filter(state_dict, patch_size=16):
         out_dict[k] = v
     return out_dict
 
-def tiny(pretrained=None, in_chans=3, **kwargs):
+def tiny(pretrained=None, in_chans=2, **kwargs):
     model = VisionTransformer(
                 patch_size=16, embed_dim=192, depth=12, num_heads=3, mlp_ratio=4, qkv_bias=True,
                 norm_layer=partial(nn.LayerNorm, eps=1e-6), in_chans=in_chans, **kwargs)
@@ -407,7 +407,7 @@ def tiny(pretrained=None, in_chans=3, **kwargs):
     return model, 192
 
     
-def small(pretrained=None, in_chans=3, **kwargs):
+def small(pretrained=None, in_chans=2, **kwargs):
     model = VisionTransformer(
         patch_size=16, embed_dim=384, depth=12, num_heads=6, mlp_ratio=4, qkv_bias=True,
         norm_layer=partial(nn.LayerNorm, eps=1e-6), in_chans=in_chans, **kwargs)
@@ -422,7 +422,7 @@ def small(pretrained=None, in_chans=3, **kwargs):
     return model, 384
 
 
-def small_dWr(pretrained=None, in_chans=3, **kwargs):
+def small_dWr(pretrained=None, in_chans=2, **kwargs):
     model = VisionTransformer(
         img_size=240, 
         patch_size=16, embed_dim=330, depth=14, num_heads=6, mlp_ratio=4, qkv_bias=True,
@@ -434,7 +434,7 @@ def small_dWr(pretrained=None, in_chans=3, **kwargs):
     return model, 330
 
 
-def base(pretrained=None, in_chans=3, **kwargs):
+def base(pretrained=None, in_chans=2, **kwargs):
     model = VisionTransformer(
         img_size=384, patch_size=16, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True,
         norm_layer=partial(nn.LayerNorm, eps=1e-6),is_distill=True, in_chans=in_chans, **kwargs)
