@@ -20,6 +20,9 @@ class APCalculator:
             'ious': []
         }
         self.gt_counts = torch.zeros(self.num_classes, device=self.device)
+        # Track IoU statistics
+        self.class_ious = [[] for _ in range(self.num_classes)]
+        self.global_ious = []
 
     def update(self, pred_classes, target_classes, confidences, ious):
         """Update detection statistics using tensor operations"""
@@ -54,6 +57,15 @@ class APCalculator:
         self.predictions['confidences'].append(confidences[mask])
         self.predictions['is_correct'].append(pred_classes[mask] == target_classes[mask])
         self.predictions['ious'].append(ious[mask])
+
+        # Track IoUs per class and globally
+        self.global_ious.extend(ious[mask].tolist())
+
+        # Update per-class IoUs
+        for cls in range(self.num_classes):
+            class_mask = (pred_classes == cls) & (target_classes == cls)
+            if class_mask.any():
+                self.class_ious[cls].extend(ious[class_mask].tolist())
 
     def compute_ap(self, class_id, threshold):
         """Compute AP for a specific class and IoU threshold"""
@@ -138,6 +150,15 @@ class APCalculator:
                 metrics[f'AP_class_{class_id}_75'] = class_aps[class_id, 1]
                 metrics[f'AP_class_{class_id}_95'] = class_aps[class_id, 2]
 
+                # Compute and add IoU for this class
+                if self.class_ious[class_id]:
+                    metrics[f'IoU_class_{class_id}'] = torch.tensor(
+                        sum(self.class_ious[class_id]) / len(self.class_ious[class_id]),
+                        device=self.device
+                    )
+                else:
+                    metrics[f'IoU_class_{class_id}'] = torch.tensor(0.0, device=self.device)
+
             # Compute mAP metrics
             metrics['mAP_50'] = class_aps[:, 0].mean()
             metrics['mAP_75'] = class_aps[:, 1].mean()
@@ -153,6 +174,15 @@ class APCalculator:
                 all_aps.append(class_aps.mean())
             metrics['mAP'] = torch.stack(all_aps).mean()
 
+            # Compute global (mean) IoU across all predictions
+            if self.global_ious:
+                metrics['mIoU'] = torch.tensor(
+                    sum(self.global_ious) / len(self.global_ious),
+                    device=self.device
+                )
+            else:
+                metrics['mIoU'] = torch.tensor(0.0, device=self.device)
+
         except Exception as e:
             print(f"Error in compute_metrics: {str(e)}")
             metrics = self._create_empty_metrics()
@@ -161,13 +191,19 @@ class APCalculator:
 
     def _create_empty_metrics(self):
         """Create zero-filled metrics when there are no predictions"""
-        metrics = {'mAP': torch.tensor(0.0, device=self.device)}
+        metrics = {
+            'mAP': torch.tensor(0.0, device=self.device),
+            'mIoU': torch.tensor(0.0, device=self.device)
+        }
         for threshold in [50, 75, 95]:
             metrics[f'mAP_{threshold}'] = torch.tensor(0.0, device=self.device)
             for c in range(self.num_classes):
                 metrics[f'AP_class_{c}_{threshold}'] = torch.tensor(0.0, device=self.device)
+
         for c in range(self.num_classes):
             metrics[f'AP_class_{c}'] = torch.tensor(0.0, device=self.device)
+            metrics[f'IoU_class_{c}'] = torch.tensor(0.0, device=self.device)
+
         return metrics
 
 
@@ -195,7 +231,8 @@ class SetCriterion(nn.Module):
         """Initialize or reset the confusion matrix"""
 
         # Include background class in confusion matrix (+1)
-        self.confusion_matrix = torch.zeros((self.numClass + 1, self.numClass + 1), dtype=torch.long, device=self.device)
+        self.confusion_matrix = torch.zeros((self.numClass + 1, self.numClass + 1), dtype=torch.long,
+                                            device=self.device)
 
     def update_confusion_matrix(self, pred_classes, target_classes):
         """Update confusion matrix with batch predictions"""
@@ -237,7 +274,8 @@ class SetCriterion(nn.Module):
                 'classification loss': torch.tensor(0.0, device=x['class'].device),
                 'bbox loss': torch.tensor(0.0, device=x['class'].device),
                 'gIoU loss': torch.tensor(0.0, device=x['class'].device),
-                'mAP': torch.tensor(0.0, device=x['class'].device)
+                'mAP': torch.tensor(0.0, device=x['class'].device),
+                'mIoU': torch.tensor(0.0, device=x['class'].device)
             }
 
     def computeLoss(self, x: Dict[str, Tensor], y: List[Dict[str, Tensor]]) -> Dict[str, Tensor]:
@@ -340,7 +378,8 @@ class SetCriterion(nn.Module):
                 'classification loss': torch.tensor(0.0, device=device),
                 'bbox loss': torch.tensor(0.0, device=device),
                 'gIoU loss': torch.tensor(0.0, device=device),
-                'mAP': torch.tensor(0.0, device=device)
+                'mAP': torch.tensor(0.0, device=device),
+                'mIoU': torch.tensor(0.0, device=device)
             }
 
     @staticmethod

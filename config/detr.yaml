@@ -1,8 +1,8 @@
 # MARK: - transformer
 detr:
   dummy: False
-  transformerName: small
-  numQuery: 100
+  transformerName: tiny
+  numQuery: 20
   numBlocks:
     - 6
     - 6

@@ -8,28 +8,13 @@ import wandb
 import hydra
 import gc
 from tqdm import tqdm
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 from src.datasets.dataset import collateFunction, load_datasets
+from src.utils.log import log_iou_metrics
 from src.models import SetCriterion
 from src.utils.utils import load_model
 from src.utils import cast2Float
 from src.utils import EarlyStopping
-
-
-def log_confusion_matrix(conf_matrix, class_labels, step, prefix="train"):
-    """Helper function to create and log confusion matrix visualizations."""
-    plt.figure(figsize=(10, 8))
-    sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues',
-                xticklabels=class_labels, yticklabels=class_labels)
-    plt.xlabel('Predicted')
-    plt.ylabel('True')
-    plt.title(f'{prefix.capitalize()} Confusion Matrix')
-
-    # Log the figure as an image
-    wandb.log({f"{prefix}/confusion_matrix_heatmap": wandb.Image(plt)}, step=step)
-    plt.close()
 
 
 @hydra.main(config_path="config", config_name="config", version_base="1.3")
@@ -42,7 +27,10 @@ def main(args):
     os.makedirs(args.outputDir, exist_ok=True)
 
     # load data
-    train_dataset, val_dataset, test_dataset = load_datasets(args)
+    train_dataset, val_dataset, test_dataset, actual_num_classes = load_datasets(args)
+
+    # Update the model's output layer to match the actual number of classes
+    args.numClass = actual_num_classes
 
     train_dataloader = DataLoader(train_dataset,
                                   batch_size=args.batchSize,
@@ -148,8 +136,8 @@ def main(args):
         # Create class labels for confusion matrix
         class_labels = [f"class_{i}" for i in range(args.numClass)] + ["background"]
 
-        # Log confusion matrix using the helper function
-        log_confusion_matrix(conf_matrix, class_labels, epoch * batches, "train")
+        # Log IoU metrics
+        log_iou_metrics(avg_metrics, epoch * batches, "train", args.numClass)
 
         try:
             # Get indices for true and predicted classes
@@ -196,8 +184,11 @@ def main(args):
             # Get validation confusion matrix
             val_conf_matrix = criterion.get_confusion_matrix().cpu().numpy()
 
-            # Log validation confusion matrix using the helper function
-            log_confusion_matrix(val_conf_matrix, class_labels, epoch * batches, "val")
+            # Compute average validation metrics
+            valMetricsDict = {k: torch.stack([m[k] for m in valMetrics]).mean().item() for k in valMetrics[0]}
+
+            # Log validation IoU metrics
+            log_iou_metrics(valMetricsDict, epoch * batches, "val", args.numClass)
 
             try:
                 wandb.log({
@@ -252,7 +243,7 @@ def main(args):
         if avgLoss < prevBestLoss:
             print('[+] Loss improved from {:.8f} to {:.8f}, saving model...'.format(prevBestLoss, avgLoss))
             torch.save(model.state_dict(), f'{wandb.run.dir}/best.pt')
-            # wandb.save(f'{wandb.run.dir}/best.pt')
+            wandb.save(f'{wandb.run.dir}/best.pt')
             prevBestLoss = avgLoss
 
         # MARK: - early stopping
@@ -282,8 +273,11 @@ def main(args):
         # Get test confusion matrix
         test_conf_matrix = criterion.get_confusion_matrix().cpu().numpy()
 
-        # Log test confusion matrix using the helper function
-        log_confusion_matrix(test_conf_matrix, class_labels, epoch * batches, "test")
+        # Compute average test metrics
+        testMetricsDict = {k: torch.stack([m[k] for m in valMetrics]).mean().item() for k in valMetrics[0]}
+
+        # Log test IoU metrics
+        log_iou_metrics(testMetricsDict, epoch * batches, "test", args.numClass)
 
         # Use wandb's built-in confusion matrix function if possible
         try:
