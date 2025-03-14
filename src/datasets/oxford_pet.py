@@ -8,49 +8,83 @@ import numpy as np
 from src.datasets.dataset import DetectionDataset
 
 
-def load_oxford_dataset(resize=224, transform=None):
+def load_oxford_dataset(resize=224, transform=None, exclude_classes=None):
+    if exclude_classes is None:
+        exclude_classes = []
 
     dataset = load_dataset("visual-layer/oxford-iiit-pet-vl-enriched")
     print(dataset)
-    # create validation set from train
+
+    # Get the full class list before any filtering
+    all_classes = dataset['train'].unique('label_breed')
+
+    # Create a list of classes excluding the unwanted ones
+    kept_classes = [cls for i, cls in enumerate(all_classes) if i not in exclude_classes]
+
+    print(f"Original classes: {len(all_classes)}")
+    print(f"Excluding classes: {[all_classes[idx] for idx in exclude_classes if idx < len(all_classes)]}")
+    print(f"Remaining classes: {len(kept_classes)}")
+
+    # Create validation set from train
     train_valid_split = dataset['train'].train_test_split(test_size=0.1)
 
     # Access the new train and validation sets
     train = train_valid_split['train']
     val = train_valid_split['test']
     test = dataset['test']
-    train = OxfordPetDataset(train, resize=resize, transform=transform)
-    val = OxfordPetDataset(val, resize=resize, transform=transform)
-    test = OxfordPetDataset(test, resize=resize, transform=transform)
-    return train, val, test
+
+    # Create all datasets with the same exclusion list and original class list
+    train = OxfordPetDataset(train, resize=resize, transform=transform, exclude_classes=exclude_classes)
+    val = OxfordPetDataset(val, resize=resize, transform=transform, exclude_classes=exclude_classes)
+    test = OxfordPetDataset(test, resize=resize, transform=transform, exclude_classes=exclude_classes)
+
+    num_classes = len(kept_classes)
+
+    return train, val, test, num_classes
 
 
 class OxfordPetDataset(DetectionDataset):
-    """Oxford-IIIT Pet Dataset
-    Args:
-        hf_dataset: Hugging Face Dataset object
-        resize: Resize the image to this size
-        transform: Optional transform to be applied on a sample.
-
-        Oxford-IIIT-Pet-enriched is a dataset of images of cats and dogs derived from the Oxford-IIIT Pet Dataset
-        enriched with bboxes for cats, dogs, and other classes that will be skipped (e.g., person, blanket, etc.)
-        __getitem__ returns a tuple of image and target (bbox and label) filtering out the other classes
-    """
-    def __init__(self, hf_dataset, resize=224, transform=None):
+    def __init__(self, hf_dataset, resize=224, transform=None, exclude_classes=None):
         super().__init__()
         self.hf_dataset = hf_dataset
         self.resize = resize
         self.transforms = transform
-        self.classes = hf_dataset.unique('label_breed')
+        self.exclude_classes = exclude_classes or []
 
-        def has_cat_or_dog(sample):
+        # Get full class list
+        all_classes = hf_dataset.unique('label_breed')
+
+        # Create a remapped class list excluding unwanted classes
+        self.original_classes = all_classes
+        self.classes = [cls for i, cls in enumerate(all_classes) if i not in self.exclude_classes]
+
+        # Create mapping from original indices to new indices
+        self.class_mapping = {}
+        new_idx = 0
+        for orig_idx, cls in enumerate(all_classes):
+            if orig_idx not in self.exclude_classes:
+                self.class_mapping[orig_idx] = new_idx
+                new_idx += 1
+
+        print(f"Original class count: {len(all_classes)}")
+        print(f"After excluding {len(self.exclude_classes)} classes: {len(self.classes)} classes")
+
+        # Filter dataset
+        def has_valid_annotations(sample):
+            breed_idx = self.original_classes.index(sample['label_breed'])
+            if breed_idx in self.exclude_classes:
+                return False
+
             if sample['label_bbox_enriched'] is None:
                 return False
+
             bbox_labels = [annotation['label'] for annotation in sample['label_bbox_enriched']]
-            return 'cat' in bbox_labels or 'dog' in bbox_labels
+            has_cat_or_dog = 'cat' in bbox_labels or 'dog' in bbox_labels
 
-        self.hf_dataset = self.hf_dataset.filter(has_cat_or_dog)
+            return has_cat_or_dog
 
+        self.hf_dataset = self.hf_dataset.filter(has_valid_annotations)
+        print(f"Dataset size after filtering: {len(self.hf_dataset)}")
 
     def __len__(self) -> int:
         return self.hf_dataset.num_rows
@@ -78,16 +112,20 @@ class OxfordPetDataset(DetectionDataset):
 
         return image, targets
 
-
     def loadAnnotations(self, sample, imgWidth: int, imgHeight: int) -> np.ndarray:
         ans = []
         for annotation in sample['label_bbox_enriched']:
             if annotation['label'] not in ['cat', 'dog']:
                 continue
-            # get index of the class from self.classes
-            cat = self.classes.index(sample['label_breed'])
+
+            # Get original class index
+            orig_cat = self.original_classes.index(sample['label_breed'])
+
+            # Map to new class index
+            cat = self.class_mapping[orig_cat]  # This remaps to a sequential index
+
             bbox = annotation['bbox']
-            bbox = [bbox[0]/imgWidth, bbox[1]/imgHeight, bbox[2]/imgWidth, bbox[3]/imgHeight]
+            bbox = [bbox[0] / imgWidth, bbox[1] / imgHeight, bbox[2] / imgWidth, bbox[3] / imgHeight]
             ans.append(bbox + [cat])
 
         return np.asarray(ans)

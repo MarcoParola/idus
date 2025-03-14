@@ -24,6 +24,9 @@ def load_datasets(args):
     import torchvision.transforms as transforms
 
     train, val, test = None, None, None
+    actual_num_classes = None
+
+    exclude_classes = args.excludeClasses
 
     if args.dataset == "oxford-pet":
         from src.datasets.oxford_pet import load_oxford_dataset
@@ -34,7 +37,15 @@ def load_datasets(args):
             transforms.Lambda(remove_alpha_channel),
         ])
 
-        train, val, test = load_oxford_dataset(resize=128, transform=transform)
+        train, val, test, actual_num_classes = load_oxford_dataset(
+            resize=128,
+            transform=transform,
+            exclude_classes=exclude_classes
+        )
+
+        # Update the number of classes in args
+        if actual_num_classes is not None:
+            args.numClass = actual_num_classes
 
     elif args.dataset == "oxford-pet-superclass":
         from src.datasets.oxford_pet_superclass import load_oxford_superclass_dataset
@@ -45,7 +56,15 @@ def load_datasets(args):
             transforms.Lambda(remove_alpha_channel),
         ])
 
-        train, val, test = load_oxford_superclass_dataset(resize=128, transform=transform)
+        train, val, test, actual_num_classes = load_oxford_superclass_dataset(
+            resize=128,
+            transform=transform,
+            exclude_classes=exclude_classes
+        )
+
+        # Update the number of classes in args
+        if actual_num_classes is not None:
+            args.numClass = actual_num_classes
 
     elif args.dataset == "fashion":
         from src.datasets.fashion import load_fashion_dataset
@@ -55,9 +74,16 @@ def load_datasets(args):
             transforms.ToTensor(),
         ])
 
-        train, val, test = load_fashion_dataset(resize=128, transform=transform)
+        train, val, test, actual_num_classes = load_fashion_dataset(
+            resize=128,
+            transform=transform,
+            exclude_classes=exclude_classes)
 
-    return train, val, test
+        # Update the number of classes in args
+        if actual_num_classes is not None:
+            args.numClass = actual_num_classes
+
+    return train, val, test, actual_num_classes
 
 
 def remove_alpha_channel(img):

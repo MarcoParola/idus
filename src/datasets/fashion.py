@@ -98,7 +98,6 @@ class FashionDataset(DetectionDataset):
         if self.transforms is not None:
             image = self.transforms(image)
 
-        # Convert grayscale to RGB if needed
         if image.shape[0] == 1:
             image = image.repeat(3, 1, 1)
 

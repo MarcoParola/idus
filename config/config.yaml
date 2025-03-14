@@ -10,7 +10,8 @@ hydra:
 model: null
 seed: 42
 numGroups: 8
-numClass: 2
+excludeClasses: []
+numClass: 37
 growthRate: 32
 currentDir: ${hydra:runtime.cwd}
 inChans: 3
@@ -28,20 +29,20 @@ weight: ""
 lr: 1e-4
 lrBackbone: 1e-5
 batchSize: 32
-weightDecay: 1e-5
+weightDecay: 1e-4
 epochs: 100
 lrDrop: 50
 clipMaxNorm: .1
 patience: 15
 
 # MARK: - loss
-classCost: 1
-bboxCost: 5
-giouCost: 2
+classCost: 5
+bboxCost: 0.5
+giouCost: 0.5
 eosCost: 0
 
 # MARK: - dataset
-dataset: "oxford-pet-superclass"
+dataset: "oxford-pet"
 dataDir: ${hydra:runtime.cwd}/data/
 trainAnnFile: ${hydra:runtime.cwd}/data/new/Train.json
 valAnnFile: ${hydra:runtime.cwd}/data/new/Valid.json
