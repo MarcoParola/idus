@@ -54,30 +54,33 @@ def main(args):
     forgetting_set = args.unlearn.forgetting_set
     unlearning_method = args.unlearn.method # TODO CHECK
 
-     if unlearning_method != 'golden': # 
+    if unlearning_method != 'golden': #
         # se non è golden, carico il modello originale per fare unlearning da ./checkpoints che è già in config outputDir
         model.load_state_dict(torch.load(f"{args.outputDir}/best.pt"))
 
     if unlearning_method == 'golden' or unlearning_method == 'finetuning': 
-        # TODO OnlyForgettingSet va definita, è una classe che fra da wrapping al dataset originale e filtra via il retaining set
-        train_dataset = OnlyForgettingSet(train_dataset, forgetting_set, removal=cr/ir) 
+        # TODO OnlyForgettingSet va definita, è una classe che fa da wrapping al dataset originale e filtra via il retaining set
+        train_dataset = OnlyForgettingSet(train_dataset, forgetting_set, removal=args.unlearningType)
 
     elif unlearning_method == 'randomrelabelling':
         # il train_dataset non viene modificato
         # modifico la loss che è una crossentropy che prende come argomento il forgetting set, così ogni volta che calcola la loss per i sample del forgetting set, genera una label random
         # criterion = ....
+        pass
 
     elif unlearning_method == 'neggrad':
         # TODO OnlyRetainingSet va definita, è una classe che fra da wrapping al dataset originale e filtra via il forgetting set
-        train_dataset = OnlyForgettingSet(train_dataset, forgetting_set, removal=cr/ir)
+        train_dataset = OnlyForgettingSet(train_dataset, forgetting_set, removal=args.unlearningType)
         # criterion = .... -> loss negativa
 
     elif unlearning_method == 'neggrad+':
         # in questo caso il dataset rimane uguale (tutto)
         # criterion = neggradplusloss -> calcola loss positiva su retaining set e negativa su forgetting set
+        pass
     
     elif unlearning_method == 'ours':
         # TODO
+        pass
 
     train_dataloader = DataLoader(train_dataset,
                                   batch_size=args.batchSize,
