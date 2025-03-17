@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import seaborn as sns
+import torch
 import wandb
 
 def log_confusion_matrix(conf_matrix, class_labels, step, prefix="train"):
@@ -17,7 +18,10 @@ def log_confusion_matrix(conf_matrix, class_labels, step, prefix="train"):
 
 def log_iou_metrics(metrics, step, prefix, num_classes):
     """Logs per-class IoU metrics and plots a bar chart."""
-    class_ious = [metrics.get(f'IoU_class_{i}', 0).cpu().numpy() for i in range(num_classes)]
+    class_ious = [
+        torch.tensor(metrics.get(f'IoU_class_{i}', 0)).cpu().numpy()
+        for i in range(num_classes)
+    ]
 
     plt.figure(figsize=(10, 5))
     plt.bar(range(num_classes), class_ious)

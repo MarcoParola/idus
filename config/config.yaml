@@ -10,8 +10,7 @@ hydra:
 model: null
 seed: 42
 numGroups: 8
-excludeClasses: []
-numClass: 37
+numClass: 20
 growthRate: 32
 currentDir: ${hydra:runtime.cwd}
 inChans: 3
@@ -42,14 +41,19 @@ giouCost: 0.5
 eosCost: 0
 
 # MARK: - dataset
-dataset: "oxford-pet"
+dataset: "voc"
 dataDir: ${hydra:runtime.cwd}/data/
 trainAnnFile: ${hydra:runtime.cwd}/data/new/Train.json
 valAnnFile: ${hydra:runtime.cwd}/data/new/Valid.json
 testAnnFile: ${hydra:runtime.cwd}/data/new/Test.json
 
+#MARK: - unlearning
+excludeClasses: []
+runType: "original"
+unlearningType: "CR"
+
 # MARK: - miscellaneous
-outputDir: ${hydra:runtime.cwd}/checkpoint
+outputDir: ${hydra:runtime.cwd}\checkpoint
 numWorkers: 7
 multi: False
 amp: False

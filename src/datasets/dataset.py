@@ -83,6 +83,26 @@ def load_datasets(args):
         if actual_num_classes is not None:
             args.numClass = actual_num_classes
 
+    elif args.dataset == "voc":
+        from src.datasets.voc import load_voc_dataset
+
+        transform = transforms.Compose([
+            transforms.Resize((128, 128)),
+            transforms.ToTensor(),
+        ])
+
+        train, val, test, actual_num_classes = load_voc_dataset(
+            root=args.dataDir if hasattr(args, 'dataDir') else "./data",
+            year=args.vocYear if hasattr(args, 'vocYear') else "2012",
+            resize=128,
+            transform=transform,
+            exclude_classes=exclude_classes
+        )
+
+        # Update the number of classes in args
+        if actual_num_classes is not None:
+            args.numClass = actual_num_classes
+
     return train, val, test, actual_num_classes
 
 
