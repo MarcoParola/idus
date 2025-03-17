@@ -44,6 +44,41 @@ def main(args):
     # Update the model's output layer to match the actual number of classes
     args.numClass = actual_num_classes
 
+    
+
+    # set model and criterion, load weights if available
+    model = load_model(args).to(device)
+    criterion = SetCriterion(args).to(device)
+
+    # recupero il forgetting set (che sarà nullo nel caso di original model training)
+    forgetting_set = args.unlearn.forgetting_set
+    unlearning_method = args.unlearn.method # TODO CHECK
+
+     if unlearning_method != 'golden': # 
+        # se non è golden, carico il modello originale per fare unlearning da ./checkpoints che è già in config outputDir
+        model.load_state_dict(torch.load(f"{args.outputDir}/best.pt"))
+
+    if unlearning_method == 'golden' or unlearning_method == 'finetuning': 
+        # TODO OnlyForgettingSet va definita, è una classe che fra da wrapping al dataset originale e filtra via il retaining set
+        train_dataset = OnlyForgettingSet(train_dataset, forgetting_set, removal=cr/ir) 
+
+    elif unlearning_method == 'randomrelabelling':
+        # il train_dataset non viene modificato
+        # modifico la loss che è una crossentropy che prende come argomento il forgetting set, così ogni volta che calcola la loss per i sample del forgetting set, genera una label random
+        # criterion = ....
+
+    elif unlearning_method == 'neggrad':
+        # TODO OnlyRetainingSet va definita, è una classe che fra da wrapping al dataset originale e filtra via il forgetting set
+        train_dataset = OnlyForgettingSet(train_dataset, forgetting_set, removal=cr/ir)
+        # criterion = .... -> loss negativa
+
+    elif unlearning_method == 'neggrad+':
+        # in questo caso il dataset rimane uguale (tutto)
+        # criterion = neggradplusloss -> calcola loss positiva su retaining set e negativa su forgetting set
+    
+    elif unlearning_method == 'ours':
+        # TODO
+
     train_dataloader = DataLoader(train_dataset,
                                   batch_size=args.batchSize,
                                   shuffle=True,
@@ -61,10 +96,6 @@ def main(args):
                                  shuffle=False,
                                  collate_fn=collateFunction,
                                  num_workers=args.numWorkers)
-
-    # set model and criterion, load weights if available
-    model = load_model(args).to(device)
-    criterion = SetCriterion(args).to(device)
 
     with torch.no_grad():
         # Set the background class bias to match DETR's initialization
@@ -108,7 +139,6 @@ def main(args):
                 out = model(imgs)
 
             metrics = criterion(out, targets)
-
             # Initialize total_metrics on the first batch
             if total_metrics is None:
                 total_metrics = {k: 0.0 for k in metrics}
