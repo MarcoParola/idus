@@ -42,7 +42,7 @@ eosCost: 0
 
 # MARK: - dataset
 dataset: "voc"
-dataDir: ${hydra:runtime.cwd}/data/
+dataDir: ${hydra:runtime.cwd}\data\
 trainAnnFile: ${hydra:runtime.cwd}/data/new/Train.json
 valAnnFile: ${hydra:runtime.cwd}/data/new/Valid.json
 testAnnFile: ${hydra:runtime.cwd}/data/new/Test.json
@@ -51,6 +51,7 @@ testAnnFile: ${hydra:runtime.cwd}/data/new/Test.json
 excludeClasses: []
 runType: "original"
 unlearningType: "CR"
+unlearningMethod: ""
 
 # MARK: - miscellaneous
 outputDir: ${hydra:runtime.cwd}\checkpoint

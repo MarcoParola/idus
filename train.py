@@ -9,6 +9,7 @@ import hydra
 import gc
 from tqdm import tqdm
 
+from src.datasets.OnlyRetainingSet import OnlyRetainingSet
 from src.datasets.dataset import collateFunction, load_datasets
 from src.utils.log import log_iou_metrics
 from src.models import SetCriterion
@@ -27,40 +28,39 @@ def main(args):
 
     # Generate filename based on runType
     if args.runType == "original":
-        filename = f"original_{args.dataset}.pt"
+        filename = f"original_{args.dataset}_{args.model}.pt"
     elif args.runType == "golden":
-        filename = f"golden_{args.dataset}_{args.unlearningType}_{args.excludeClasses}.pt"
+        filename = f"golden_{args.dataset}_{args.model}_{args.unlearningType}_{args.excludeClasses}.pt"
     else:
         # Default filename if runType is not specified
-        filename = f"model_{args.dataset}.pt"
+        filename = f"model_{args.model}_{args.dataset}.pt"
 
     # Full path to save model
     model_path = os.path.join(args.outputDir, filename)
     print(f"[+] Model will be saved to: {model_path}")
 
     # load data
-    train_dataset, val_dataset, test_dataset, actual_num_classes = load_datasets(args)
-
-    # Update the model's output layer to match the actual number of classes
-    args.numClass = actual_num_classes
-
-    
+    train_dataset, val_dataset, test_dataset= load_datasets(args)
 
     # set model and criterion, load weights if available
     model = load_model(args).to(device)
     criterion = SetCriterion(args).to(device)
 
     # recupero il forgetting set (che sarà nullo nel caso di original model training)
-    forgetting_set = args.unlearn.forgetting_set
-    unlearning_method = args.unlearn.method # TODO CHECK
+    forgetting_set = args.excludeClasses
+    unlearning_method = args.unlearningMethod
 
-    if unlearning_method != 'golden': #
+    if unlearning_method != 'golden':
         # se non è golden, carico il modello originale per fare unlearning da ./checkpoints che è già in config outputDir
-        model.load_state_dict(torch.load(f"{args.outputDir}/best.pt"))
+        model.load_state_dict(torch.load(f"{args.outputDir}/original_{args.dataset}.pt"))
 
-    if unlearning_method == 'golden' or unlearning_method == 'finetuning': 
-        # TODO OnlyForgettingSet va definita, è una classe che fa da wrapping al dataset originale e filtra via il retaining set
-        train_dataset = OnlyForgettingSet(train_dataset, forgetting_set, removal=args.unlearningType)
+    if unlearning_method == 'golden' or unlearning_method == 'finetuning':
+        train_dataset = OnlyRetainingSet(train_dataset, forgetting_set, removal=args.unlearningType)
+        val_dataset = OnlyRetainingSet(val_dataset, forgetting_set, removal=args.unlearningType)
+        test_dataset = OnlyRetainingSet(test_dataset, forgetting_set, removal=args.unlearningType)
+        args.numClass = len(train_dataset.classes) - (1 if train_dataset.classes[0].lower() == 'background' else 0)
+        model = load_model(args).to(device)
+        criterion = SetCriterion(args).to(device)
 
     elif unlearning_method == 'randomrelabelling':
         # il train_dataset non viene modificato
@@ -69,8 +69,11 @@ def main(args):
         pass
 
     elif unlearning_method == 'neggrad':
-        # TODO OnlyRetainingSet va definita, è una classe che fra da wrapping al dataset originale e filtra via il forgetting set
-        train_dataset = OnlyForgettingSet(train_dataset, forgetting_set, removal=args.unlearningType)
+        train_dataset = OnlyRetainingSet(train_dataset, forgetting_set, removal=args.unlearningType)
+        val_dataset = OnlyRetainingSet(val_dataset, forgetting_set, removal=args.unlearningType)
+        test_dataset = OnlyRetainingSet(test_dataset, forgetting_set, removal=args.unlearningType)
+        args.numClass = len(train_dataset.classes) - (1 if train_dataset.classes[0].lower() == 'background' else 0)
+        model = load_model(args).to(device)
         # criterion = .... -> loss negativa
 
     elif unlearning_method == 'neggrad+':
