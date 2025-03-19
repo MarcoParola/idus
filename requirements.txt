@@ -5,3 +5,5 @@ wandb
 torchvision
 transformers
 datasets
+seaborn
+scipy
