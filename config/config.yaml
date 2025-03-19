@@ -25,7 +25,7 @@ weight: ""
 
 
 # MARK: - training config
-lr: 1e-4
+lr: 1e-5
 lrBackbone: 1e-5
 batchSize: 32
 weightDecay: 1e-4
@@ -35,10 +35,10 @@ clipMaxNorm: .1
 patience: 15
 
 # MARK: - loss
-classCost: 5
+classCost: 10
 bboxCost: 0.5
 giouCost: 0.5
-eosCost: 0
+eosCost: 0.01
 
 # MARK: - dataset
 dataset: "voc"
