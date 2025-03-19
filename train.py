@@ -9,6 +9,7 @@ import hydra
 import gc
 from tqdm import tqdm
 
+from src.datasets.OnlyRetainingSet import OnlyRetainingSet
 from src.datasets.dataset import collateFunction, load_datasets
 from src.utils.log import log_iou_metrics
 from src.models import SetCriterion
@@ -24,48 +25,65 @@ def main(args):
     wandb.init(entity=args.wandbEntity, project=args.wandbProject, config=dict(args))
     torch.manual_seed(args.seed)
     device = torch.device(args.device)
-    os.makedirs(args.outputDir, exist_ok=True)
+
+    # Generate filename based on runType
+    if args.runType == "original":
+        filename = f"original_{args.dataset}_{args.model}.pt"
+    elif args.runType == "golden":
+        filename = f"golden_{args.dataset}_{args.model}_{args.unlearningType}_{args.excludeClasses}.pt"
+    else:
+        # Default filename if runType is not specified
+        filename = f"model_{args.model}_{args.dataset}.pt"
+
+    # Full path to save model
+    model_path = os.path.join(args.outputDir, filename)
+    print(f"[+] Model will be saved to: {model_path}")
 
     # load data
-    train_dataset, val_dataset, test_dataset, actual_num_classes = load_datasets(args)
-
-    # Update the model's output layer to match the actual number of classes
-    args.numClass = actual_num_classes
-
-    
+    train_dataset, val_dataset, test_dataset= load_datasets(args)
 
     # set model and criterion, load weights if available
     model = load_model(args).to(device)
     criterion = SetCriterion(args).to(device)
 
     # recupero il forgetting set (che sarà nullo nel caso di original model training)
-    forgetting_set = args.unlearn.forgetting_set
-    unlearning_method = args.unlearn.method # TODO CHECK
+    forgetting_set = args.excludeClasses
+    unlearning_method = args.unlearningMethod
 
-     if unlearning_method != 'golden': # 
+    if unlearning_method != 'golden':
         # se non è golden, carico il modello originale per fare unlearning da ./checkpoints che è già in config outputDir
-        model.load_state_dict(torch.load(f"{args.outputDir}/best.pt"))
+        model.load_state_dict(torch.load(f"{args.outputDir}/original_{args.dataset}.pt"))
 
-    if unlearning_method == 'golden' or unlearning_method == 'finetuning': 
-        # TODO OnlyForgettingSet va definita, è una classe che fra da wrapping al dataset originale e filtra via il retaining set
-        train_dataset = OnlyForgettingSet(train_dataset, forgetting_set, removal=cr/ir) 
+    if unlearning_method == 'golden' or unlearning_method == 'finetuning':
+        train_dataset = OnlyRetainingSet(train_dataset, forgetting_set, removal=args.unlearningType)
+        val_dataset = OnlyRetainingSet(val_dataset, forgetting_set, removal=args.unlearningType)
+        test_dataset = OnlyRetainingSet(test_dataset, forgetting_set, removal=args.unlearningType)
+        args.numClass = len(train_dataset.classes) - (1 if train_dataset.classes[0].lower() == 'background' else 0)
+        model = load_model(args).to(device)
+        criterion = SetCriterion(args).to(device)
 
     elif unlearning_method == 'randomrelabelling':
         # il train_dataset non viene modificato
         # modifico la loss che è una crossentropy che prende come argomento il forgetting set, così ogni volta che calcola la loss per i sample del forgetting set, genera una label random
         # criterion = ....
+        pass
 
     elif unlearning_method == 'neggrad':
-        # TODO OnlyRetainingSet va definita, è una classe che fra da wrapping al dataset originale e filtra via il forgetting set
-        train_dataset = OnlyForgettingSet(train_dataset, forgetting_set, removal=cr/ir)
+        train_dataset = OnlyRetainingSet(train_dataset, forgetting_set, removal=args.unlearningType)
+        val_dataset = OnlyRetainingSet(val_dataset, forgetting_set, removal=args.unlearningType)
+        test_dataset = OnlyRetainingSet(test_dataset, forgetting_set, removal=args.unlearningType)
+        args.numClass = len(train_dataset.classes) - (1 if train_dataset.classes[0].lower() == 'background' else 0)
+        model = load_model(args).to(device)
         # criterion = .... -> loss negativa
 
     elif unlearning_method == 'neggrad+':
         # in questo caso il dataset rimane uguale (tutto)
         # criterion = neggradplusloss -> calcola loss positiva su retaining set e negativa su forgetting set
+        pass
     
     elif unlearning_method == 'ours':
         # TODO
+        pass
 
     train_dataloader = DataLoader(train_dataset,
                                   batch_size=args.batchSize,
@@ -106,9 +124,6 @@ def main(args):
     criterion.train()
 
     for epoch in range(args.epochs):
-        # Reset confusion matrix at the start of each epoch
-        criterion.reset_confusion_matrix()
-
         wandb.log({"epoch": epoch}, step=epoch * batches)
         total_loss = 0.0
         total_metrics = None  # Initialize total_metrics
@@ -160,31 +175,8 @@ def main(args):
         avg_loss = total_loss / len(train_dataloader)
         avg_metrics = {k: v / len(train_dataloader) for k, v in total_metrics.items()}
 
-        # Get and log confusion matrix at the end of the epoch
-        conf_matrix = criterion.get_confusion_matrix().cpu().numpy()
-
-        # Create class labels for confusion matrix
-        class_labels = [f"class_{i}" for i in range(args.numClass)] + ["background"]
-
         # Log IoU metrics
         log_iou_metrics(avg_metrics, epoch * batches, "train", args.numClass)
-
-        try:
-            # Get indices for true and predicted classes
-            true_classes = np.arange(len(class_labels))
-            pred_classes = np.arange(len(class_labels))
-
-            wandb.log({
-                "train/confusion_matrix": wandb.plot.confusion_matrix(
-                    probs=None,
-                    y_true=true_classes,
-                    preds=pred_classes,
-                    class_names=class_labels,
-                    title="Training Confusion Matrix"
-                )
-            }, step=epoch * batches)
-        except Exception as e:
-            print(f"Error logging confusion matrix with wandb.plot: {e}")
 
         wandb.log({"train/loss": avg_loss}, step=epoch * batches)
         print(f'Epoch {epoch}, loss: {avg_loss:.8f}')
@@ -195,8 +187,6 @@ def main(args):
         # MARK: - validation
         model.eval()
         criterion.eval()
-        # Reset confusion matrix for validation
-        criterion.reset_confusion_matrix()
 
         with torch.no_grad():
             valMetrics = []
@@ -211,27 +201,11 @@ def main(args):
                 loss = sum(v for k, v in metrics.items() if 'loss' in k)
                 losses.append(loss.cpu().item())
 
-            # Get validation confusion matrix
-            val_conf_matrix = criterion.get_confusion_matrix().cpu().numpy()
-
             # Compute average validation metrics
             valMetricsDict = {k: torch.stack([m[k] for m in valMetrics]).mean().item() for k in valMetrics[0]}
 
             # Log validation IoU metrics
             log_iou_metrics(valMetricsDict, epoch * batches, "val", args.numClass)
-
-            try:
-                wandb.log({
-                    "val/confusion_matrix": wandb.plot.confusion_matrix(
-                        probs=None,
-                        y_true=true_classes,
-                        preds=pred_classes,
-                        class_names=class_labels,
-                        title="Validation Confusion Matrix"
-                    )
-                }, step=epoch * batches)
-            except Exception as e:
-                print(f"Error logging validation confusion matrix with wandb.plot: {e}")
 
             valMetrics = {k: torch.stack([m[k] for m in valMetrics]).mean() for k in valMetrics[0]}
             avgLoss = np.mean(losses)
@@ -272,8 +246,15 @@ def main(args):
         # MARK: - save model
         if avgLoss < prevBestLoss:
             print('[+] Loss improved from {:.8f} to {:.8f}, saving model...'.format(prevBestLoss, avgLoss))
-            torch.save(model.state_dict(), f'{wandb.run.dir}/best.pt')
-            wandb.save(f'{wandb.run.dir}/best.pt')
+
+            # Save to local path
+            torch.save(model.state_dict(), model_path)
+            print(f'[+] Model saved locally to {model_path}')
+
+            # Save to wandb with the same filename
+            torch.save(model.state_dict(), os.path.join(wandb.run.dir, filename))
+            wandb.save(os.path.join(wandb.run.dir, filename))
+
             prevBestLoss = avgLoss
 
         # MARK: - early stopping
@@ -300,14 +281,18 @@ def main(args):
             loss = sum(v for k, v in metrics.items() if 'loss' in k)
             losses.append(loss.cpu().item())
 
-        # Get test confusion matrix
-        test_conf_matrix = criterion.get_confusion_matrix().cpu().numpy()
-
         # Compute average test metrics
         testMetricsDict = {k: torch.stack([m[k] for m in valMetrics]).mean().item() for k in valMetrics[0]}
 
         # Log test IoU metrics
         log_iou_metrics(testMetricsDict, epoch * batches, "test", args.numClass)
+
+        # Create class labels for confusion matrix
+        class_labels = [f"class_{i}" for i in range(args.numClass)] + ["background"]
+
+        # Get indices for true and predicted classes
+        true_classes = np.arange(len(class_labels))
+        pred_classes = np.arange(len(class_labels))
 
         # Use wandb's built-in confusion matrix function if possible
         try:
@@ -329,6 +314,8 @@ def main(args):
         for k, v in valMetrics.items():
             wandb.log({f"test/{k}": v.item()}, step=epoch * batches)
 
+    # Make sure the final best model is saved again at the end of training
+    print(f'[+] Training complete. Best model saved at {model_path}')
     wandb.finish()
 
 
