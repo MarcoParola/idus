@@ -33,12 +33,9 @@ def main(args):
 
     # Generate filename based on unlearningMethod
     if args.unlearningMethod == "none":
-        filename = f"original_{args.dataset}_{args.model}.pt"
-    elif args.unlearningMethod == "golden":
-        filename = f"golden_{args.dataset}_{args.model}_{args.unlearningType}_{args.excludeClasses}.pt"
+        filename = f"original_{args.model}_{args.dataset}.pt"
     else:
-        # Default filename if unlearningMethod is not specified
-        filename = f"model_{args.model}_{args.dataset}.pt"
+        filename = f"{args.unlearningMethod}_{args.model}_{args.dataset}_{args.unlearningType}_{args.excludeClasses}.pt"
 
     # Full path to save model
     model_path = os.path.join(args.outputDir, filename)

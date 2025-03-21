@@ -42,7 +42,7 @@ class OnlyForgettingSet(Dataset):
 
         print(f"Original class count: {len(self.original_classes) - (1 if self.has_background else 0)}")
         print(f"Focusing on forgetting classes: {forgetting_classes}")
-        print(f"Retaining only samples with these classes")
+        print(f"Retaining only annotations for these classes")
 
         # Filter dataset to only include samples with annotations from forgetting set
         self.valid_indices = []
@@ -74,5 +74,32 @@ class OnlyForgettingSet(Dataset):
         # Use the filtered index
         actual_idx = self.valid_indices[idx]
         image, targets = self.dataset[actual_idx]
+
+        # Filter the annotations to keep only those in the forgetting set
+        if 'labels' in targets:
+            labels = targets['labels']
+
+            if isinstance(labels, torch.Tensor):
+                # Find indices of labels in the forgetting set
+                mask = torch.zeros_like(labels, dtype=torch.bool)
+                for forgetting_label in self.forgetting_set:
+                    mask |= (labels == forgetting_label)
+
+                # Keep only the annotations for classes in the forgetting set
+                for key in targets:
+                    if targets[key].shape[0] == labels.shape[
+                        0]:  # Only filter tensors with same first dimension as labels
+                        targets[key] = targets[key][mask]
+            else:
+                # Handle non-tensor labels (e.g., lists)
+                mask = [i for i, label in enumerate(labels) if label in self.forgetting_set]
+
+                for key in list(targets.keys()):
+                    if hasattr(targets[key], '__len__') and len(targets[key]) == len(labels):
+                        if isinstance(targets[key], list):
+                            targets[key] = [targets[key][i] for i in mask]
+                        elif isinstance(targets[key], torch.Tensor):
+                            targets[key] = targets[key][torch.tensor(mask)]
+                        # Add other types as needed
 
         return image, targets
