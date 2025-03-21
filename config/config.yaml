@@ -49,7 +49,6 @@ testAnnFile: ${hydra:runtime.cwd}/data/new/Test.json
 
 #MARK: - unlearning
 excludeClasses: []
-runType: "original"
 unlearningType: "CR"
 unlearningMethod: ""
 

@@ -31,13 +31,13 @@ def main(args):
     torch.manual_seed(args.seed)
     device = torch.device(args.device)
 
-    # Generate filename based on runType
-    if args.runType == "original":
+    # Generate filename based on unlearningMethod
+    if args.unlearningMethod == "none":
         filename = f"original_{args.dataset}_{args.model}.pt"
-    elif args.runType == "golden":
+    elif args.unlearningMethod == "golden":
         filename = f"golden_{args.dataset}_{args.model}_{args.unlearningType}_{args.excludeClasses}.pt"
     else:
-        # Default filename if runType is not specified
+        # Default filename if unlearningMethod is not specified
         filename = f"model_{args.model}_{args.dataset}.pt"
 
     # Full path to save model
@@ -58,7 +58,7 @@ def main(args):
     forgetting_set = args.excludeClasses
     unlearning_method = args.unlearningMethod
 
-    if unlearning_method != '':
+    if unlearning_method != 'none':
         if unlearning_method != 'golden':
             # Load original model for unlearning from ./checkpoints (set in config outputDir)
             model.load_state_dict(torch.load(f"{args.outputDir}\original_{args.dataset}_{args.model}.pt"))
