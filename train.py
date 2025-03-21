@@ -12,7 +12,9 @@ from tqdm import tqdm
 from src.datasets.OnlyForgettingSet import OnlyForgettingSet
 from src.datasets.OnlyRetainingSet import OnlyRetainingSet
 from src.datasets.dataset import collateFunction, load_datasets
+from src.models.NegGradCriterion import NegGradCriterion, NegGradPlusCriterion
 from src.models.ObjectDetectionMetrics import ObjectDetectionMetrics
+from src.models.RandomRelabellingCriterion import RandomRelabellingCriterion
 from src.utils.log import log_iou_metrics
 from src.models.BaseCriterion import BaseCriterion
 
@@ -56,9 +58,11 @@ def main(args):
     forgetting_set = args.excludeClasses
     unlearning_method = args.unlearningMethod
 
-    if unlearning_method != 'golden':
-        # Load original model for unlearning from ./checkpoints (set in config outputDir)
-        model.load_state_dict(torch.load(f"{args.outputDir}/original_{args.dataset}_{args.model}.pt"))
+    if unlearning_method != '':
+        if unlearning_method != 'golden':
+            # Load original model for unlearning from ./checkpoints (set in config outputDir)
+            model.load_state_dict(torch.load(f"{args.outputDir}\original_{args.dataset}_{args.model}.pt"))
+        pass
 
     # Configure datasets based on unlearning method
     if unlearning_method == 'golden' or unlearning_method == 'finetuning':
@@ -72,20 +76,17 @@ def main(args):
         metrics_calculator = ObjectDetectionMetrics(args).to(device)
 
     elif unlearning_method == 'randomrelabelling':
-        # Use default train_dataset
-        # Modify loss function to generate random labels for forgetting set
+        criterion = RandomRelabellingCriterion(args).to(device)
         pass
 
     elif unlearning_method == 'neggrad':
         train_dataset = OnlyForgettingSet(train_dataset, forgetting_set, removal=args.unlearningType)
         val_dataset = OnlyForgettingSet(val_dataset, forgetting_set, removal=args.unlearningType)
         test_dataset = OnlyForgettingSet(test_dataset, forgetting_set, removal=args.unlearningType)
-        # Use negative loss for forgetting set
+        criterion = NegGradCriterion(args).to(device)
 
     elif unlearning_method == 'neggrad+':
-        # Use default train_dataset
-        # Use positive loss for retaining set and negative loss for forgetting set
-        pass
+        criterion = NegGradPlusCriterion(args).to(device)
 
     elif unlearning_method == 'ours':
         # TODO: Implement custom unlearning method

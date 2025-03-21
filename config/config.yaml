@@ -35,10 +35,10 @@ clipMaxNorm: .1
 patience: 15
 
 # MARK: - loss
-classCost: 10
+classCost: 5
 bboxCost: 0.5
 giouCost: 0.5
-eosCost: 0.01
+eosCost: 0
 
 # MARK: - dataset
 dataset: "voc"
