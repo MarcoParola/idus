@@ -15,7 +15,6 @@ from src.datasets.RandomRelabellingSet import RandomRelabellingSet
 from src.datasets.dataset import collateFunction, load_datasets
 from src.models.NegGradCriterion import NegGradCriterion, NegGradPlusCriterion
 from src.models.ObjectDetectionMetrics import ObjectDetectionMetrics
-from src.models.RandomRelabellingCriterion import RandomRelabellingCriterion
 from src.utils.log import log_iou_metrics
 from src.models.BaseCriterion import BaseCriterion
 

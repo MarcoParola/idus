@@ -287,7 +287,7 @@ class ObjectDetectionMetrics(nn.Module):
                     ious = torch.diag(boxIoU(boxCxcywh2Xyxy(boxes), boxCxcywh2Xyxy(targetBoxes))[0])
 
                     # Debug print every 100 steps
-                    if self.step_counter % 1 == 0:
+                    if self.step_counter % 1000 == 0:
                         print(f"[Step {self.step_counter}] Metrics calculation")
                         print(f"Pred: {predClass[:10].tolist()}... | Target: {targetClassO[:10].tolist()}...")
                         print(f"Confidences: {confidences[:10].tolist()}... | IoUs: {ious[:10].tolist()}...")

@@ -85,7 +85,7 @@ class BaseCriterion(nn.Module):
             }
 
             # Debug print every 100 steps
-            if self.step_counter % 100 == 0:
+            if self.step_counter % 1000 == 0:
                 print(f"[Step {self.step_counter}] Losses: Class={classificationLoss.item():.4f}, "
                       f"BBox={bboxLoss.item():.4f}, gIoU={giouLoss.item():.4f}")
 
