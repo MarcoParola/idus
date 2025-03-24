@@ -11,6 +11,7 @@ from tqdm import tqdm
 
 from src.datasets.OnlyForgettingSet import OnlyForgettingSet
 from src.datasets.OnlyRetainingSet import OnlyRetainingSet
+from src.datasets.RandomRelabellingSet import RandomRelabellingSet
 from src.datasets.dataset import collateFunction, load_datasets
 from src.models.NegGradCriterion import NegGradCriterion, NegGradPlusCriterion
 from src.models.ObjectDetectionMetrics import ObjectDetectionMetrics
@@ -59,7 +60,6 @@ def main(args):
         if unlearning_method != 'golden':
             # Load original model for unlearning from ./checkpoints (set in config outputDir)
             model.load_state_dict(torch.load(f"{args.outputDir}\original_{args.dataset}_{args.model}.pt"))
-        pass
 
     # Configure datasets based on unlearning method
     if unlearning_method == 'golden' or unlearning_method == 'finetuning':
@@ -72,9 +72,12 @@ def main(args):
         criterion = BaseCriterion(args).to(device)
         metrics_calculator = ObjectDetectionMetrics(args).to(device)
 
+
     elif unlearning_method == 'randomrelabelling':
-        criterion = RandomRelabellingCriterion(args).to(device)
-        pass
+        train_dataset = RandomRelabellingSet(train_dataset, forgetting_set, removal=args.unlearningType)
+        val_dataset = RandomRelabellingSet(val_dataset, forgetting_set, removal=args.unlearningType)
+        test_dataset = RandomRelabellingSet(test_dataset, forgetting_set, removal=args.unlearningType)
+        criterion = BaseCriterion(args).to(device)
 
     elif unlearning_method == 'neggrad':
         train_dataset = OnlyForgettingSet(train_dataset, forgetting_set, removal=args.unlearningType)
