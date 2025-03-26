@@ -63,8 +63,6 @@ def main(args):
     # Configure datasets based on unlearning method
     if unlearning_method == 'golden' or unlearning_method == 'finetuning':
         train_dataset = OnlyRetainingSet(train_dataset, forgetting_set, removal=args.unlearningType)
-        val_dataset = OnlyRetainingSet(val_dataset, forgetting_set, removal=args.unlearningType)
-        test_dataset = OnlyRetainingSet(test_dataset, forgetting_set, removal=args.unlearningType)
         args.numClass = len(train_dataset.classes) - (1 if train_dataset.classes[0].lower() == 'background' else 0)
         # Reinitialize model and criterion with updated number of classes
         model = load_model(args).to(device)
@@ -74,14 +72,10 @@ def main(args):
 
     elif unlearning_method == 'randomrelabelling':
         train_dataset = RandomRelabellingSet(train_dataset, forgetting_set, removal=args.unlearningType)
-        val_dataset = RandomRelabellingSet(val_dataset, forgetting_set, removal=args.unlearningType)
-        test_dataset = RandomRelabellingSet(test_dataset, forgetting_set, removal=args.unlearningType)
         criterion = BaseCriterion(args).to(device)
 
     elif unlearning_method == 'neggrad':
         train_dataset = OnlyForgettingSet(train_dataset, forgetting_set, removal=args.unlearningType)
-        val_dataset = OnlyForgettingSet(val_dataset, forgetting_set, removal=args.unlearningType)
-        test_dataset = OnlyForgettingSet(test_dataset, forgetting_set, removal=args.unlearningType)
         criterion = NegGradCriterion(args).to(device)
 
     elif unlearning_method == 'neggrad+':
