@@ -13,7 +13,7 @@ class TestDetr(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Set up the model and configuration"""
-        @hydra.main(config_path="C:\\Users\\pietr\\PycharmProjects\\idus\\config", config_name="config", version_base="1.3")
+        @hydra.main(config_path="/config", config_name="config", version_base="1.3")
         def get_config(cfg: DictConfig):
             cls.cfg = cfg
             cls.model = DETR(cls.cfg)

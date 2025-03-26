@@ -15,7 +15,7 @@ class TestYolosModel(unittest.TestCase):
 
         # Hydrate config from a file (use your config path here)
         # Here I assume that the `main` function from your code is used to load the config via Hydra.
-        @hydra.main(config_path="C:\\Users\\pietr\\PycharmProjects\\idus\\config", config_name="config",
+        @hydra.main(config_path="/config", config_name="config",
                     version_base="1.3")
         def get_config(cfg: DictConfig):
             cls.cfg = cfg

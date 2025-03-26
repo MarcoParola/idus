@@ -264,6 +264,10 @@ class ObjectDetectionMetrics(nn.Module):
             if not hasattr(self, 'step_counter'):
                 self.step_counter = 0
 
+            # Early return if no ground truth annotations exist
+            if not y or all(len(t['labels']) == 0 for t in y):
+                return self.ap_calculator._create_empty_metrics()
+
             ids = self.matcher(x, y)
             idx = self.get_permutation_idx(ids)
 
@@ -271,10 +275,13 @@ class ObjectDetectionMetrics(nn.Module):
             logits = x['class']
             targetClassO = torch.cat([t['labels'] for t, (_, J) in zip(y, ids)])
 
-            # Get boxes for matched predictions
+            # Create a mask for valid annotations
             mask = targetClassO != self.numClass
-            boxes = x['bbox'][idx][mask]
-            targetBoxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(y, ids)], 0)[mask]
+
+            # Early return if no valid annotations after masking
+            if not mask.any():
+                print("No valid annotations after masking.")
+                return self.ap_calculator._create_empty_metrics()
 
             metrics = {}
 
@@ -283,46 +290,56 @@ class ObjectDetectionMetrics(nn.Module):
                 softmaxed = nn.functional.softmax(matched_logits, -1)
                 confidences, predClass = softmaxed.max(-1)
 
-                if len(boxes) > 0:
-                    ious = torch.diag(boxIoU(boxCxcywh2Xyxy(boxes), boxCxcywh2Xyxy(targetBoxes))[0])
+                # Safely get boxes and target boxes
+                try:
+                    boxes = x['bbox'][idx][mask]
+                    targetBoxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(y, ids)], 0)[mask]
+                except Exception as box_err:
+                    print(f"Error extracting boxes: {box_err}")
+                    return self.ap_calculator._create_empty_metrics()
 
-                    # Debug print every 100 steps
-                    if self.step_counter % 1000 == 0:
-                        print(f"[Step {self.step_counter}] Metrics calculation")
-                        print(f"Pred: {predClass[:10].tolist()}... | Target: {targetClassO[:10].tolist()}...")
-                        print(f"Confidences: {confidences[:10].tolist()}... | IoUs: {ious[:10].tolist()}...")
+                # Ensure we still have valid boxes
+                if len(boxes) == 0:
+                    print("No valid boxes found after processing.")
+                    return self.ap_calculator._create_empty_metrics()
 
-                    # Update confusion matrix for matched classes
-                    if mask.any():
-                        self.update_confusion_matrix(predClass[mask].detach(), targetClassO[mask].detach())
+                ious = torch.diag(boxIoU(boxCxcywh2Xyxy(boxes), boxCxcywh2Xyxy(targetBoxes))[0])
 
-                    self.step_counter += 1
+                # Debug print every 100 steps
+                if self.step_counter % 100 == 0:
+                    print(f"[Step {self.step_counter}] Metrics calculation")
+                    print(f"Pred: {predClass[:10].tolist()}... | Target: {targetClassO[:10].tolist()}...")
+                    print(f"Confidences: {confidences[:10].tolist()}... | IoUs: {ious[:10].tolist()}...")
 
-                    try:
-                        # Make sure all tensors have the same size before updating AP calculator
-                        if len(predClass[mask]) == len(targetClassO[mask]) == len(confidences[mask]) == len(ious):
-                            # Update AP calculator with batch statistics
-                            self.ap_calculator.update(
-                                predClass[mask],
-                                targetClassO[mask],
-                                confidences[mask],
-                                ious
-                            )
+                # Update confusion matrix for matched classes
+                if mask.any():
+                    self.update_confusion_matrix(predClass[mask].detach(), targetClassO[mask].detach())
 
-                            # Calculate all metrics at once
-                            metrics = self.ap_calculator.compute_metrics()
-                        else:
-                            print(f"Warning: Skipping AP calculation due to size mismatch - "
-                                  f"pred: {predClass[mask].shape}, target: {targetClassO[mask].shape}, "
-                                  f"conf: {confidences[mask].shape}, ious: {ious.shape}")
-                            # Add empty metrics
-                            metrics = self.ap_calculator._create_empty_metrics()
-                    except Exception as e:
-                        print(f"Error in AP calculation: {str(e)}")
+                self.step_counter += 1
+
+                try:
+                    # Make sure all tensors have the same size before updating AP calculator
+                    if (len(predClass[mask]) == len(targetClassO[mask]) ==
+                            len(confidences[mask]) == len(ious)):
+                        # Update AP calculator with batch statistics
+                        self.ap_calculator.update(
+                            predClass[mask],
+                            targetClassO[mask],
+                            confidences[mask],
+                            ious
+                        )
+
+                        # Calculate all metrics at once
+                        metrics = self.ap_calculator.compute_metrics()
+                    else:
+                        print(f"Warning: Skipping AP calculation due to size mismatch - "
+                              f"pred: {predClass[mask].shape}, target: {targetClassO[mask].shape}, "
+                              f"conf: {confidences[mask].shape}, ious: {ious.shape}")
                         # Add empty metrics
                         metrics = self.ap_calculator._create_empty_metrics()
-                else:
-                    # Create empty metrics when there are no valid boxes
+                except Exception as e:
+                    print(f"Error in AP calculation: {str(e)}")
+                    # Add empty metrics
                     metrics = self.ap_calculator._create_empty_metrics()
 
             return metrics

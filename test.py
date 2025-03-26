@@ -10,10 +10,10 @@ import gc
 from src.datasets.OnlyForgettingSet import OnlyForgettingSet
 from src.datasets.OnlyRetainingSet import OnlyRetainingSet
 from src.datasets.dataset import load_datasets, collateFunction
-from src.models.NegGradCriterion import NegGradCriterion, NegGradPlusCriterion
+from src.loss.NegGradCriterion import NegGradCriterion, NegGradPlusCriterion
 from src.models.RandomRelabellingCriterion import RandomRelabellingCriterion
 from src.models.ObjectDetectionMetrics import ObjectDetectionMetrics
-from src.models.BaseCriterion import BaseCriterion
+from src.loss.BaseCriterion import BaseCriterion
 from src.utils.log import log_iou_metrics
 from src.utils.utils import load_model
 from src.utils import cast2Float

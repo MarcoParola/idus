@@ -1,4 +1,4 @@
-from src.models.BaseCriterion import BaseCriterion
+from src.loss.BaseCriterion import BaseCriterion
 from src.utils.boxOps import boxCxcywh2Xyxy, gIoU
 
 from typing import Dict, List
@@ -21,6 +21,21 @@ class NegGradCriterion(BaseCriterion):
             if not hasattr(self, 'step_counter'):
                 self.step_counter = 0
 
+            # Filter out targets with no annotations
+            valid_targets = [t for t in y if len(t['labels']) > 0]
+
+            # If no valid targets, return zero losses
+            if not valid_targets:
+                device = x['class'].device
+                return {
+                    'classification loss': torch.tensor(0.0, device=device, requires_grad=True),
+                    'bbox loss': torch.tensor(0.0, device=device, requires_grad=True),
+                    'gIoU loss': torch.tensor(0.0, device=device, requires_grad=True)
+                }
+
+            # Use only valid targets
+            y = valid_targets
+
             ids = self.matcher(x, y)
             idx = self.getPermutationIdx(ids)
 
@@ -35,21 +50,26 @@ class NegGradCriterion(BaseCriterion):
 
             # Box loss computation
             mask = targetClassO != self.numClass
-            boxes = x['bbox'][idx][mask]
-            targetBoxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(y, ids)], 0)[mask]
 
-            # Get the class labels for the boxes
-            box_classes = targetClassO[mask]
+            # Ensure we have boxes to compute loss
+            if mask.any():
+                boxes = x['bbox'][idx][mask]
+                targetBoxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(y, ids)], 0)[mask]
 
-            numBoxes = len(targetBoxes) + 1e-6
+                numBoxes = len(targetBoxes) + 1e-6
 
-            bboxLoss = nn.functional.l1_loss(boxes, targetBoxes, reduction='none')
-            bboxLoss = bboxLoss.sum() / numBoxes
-            bboxLoss *= self.bboxCost
+                bboxLoss = nn.functional.l1_loss(boxes, targetBoxes, reduction='none')
+                bboxLoss = bboxLoss.sum() / numBoxes
+                bboxLoss *= self.bboxCost
 
-            giouLoss = 1 - torch.diag(gIoU(boxCxcywh2Xyxy(boxes), boxCxcywh2Xyxy(targetBoxes)))
-            giouLoss = giouLoss.sum() / numBoxes
-            giouLoss *= self.giouCost
+                giouLoss = 1 - torch.diag(gIoU(boxCxcywh2Xyxy(boxes), boxCxcywh2Xyxy(targetBoxes)))
+                giouLoss = giouLoss.sum() / numBoxes
+                giouLoss *= self.giouCost
+            else:
+                # If no valid boxes, use zero losses
+                device = x['class'].device
+                bboxLoss = torch.tensor(0.0, device=device, requires_grad=True)
+                giouLoss = torch.tensor(0.0, device=device, requires_grad=True)
 
             # Apply negative gradient since this is the forgetting set
             classificationLoss = -classificationLoss
@@ -73,12 +93,12 @@ class NegGradCriterion(BaseCriterion):
 
         except Exception as e:
             print(f"Error in computeLoss: {str(e)}")
-            # Return empty metrics to continue training
-            device = x['class'].device if 'class' in x else 'cpu'
+            # Return zero tensors with gradient
+            device = x['class'].device
             return {
-                'classification loss': torch.tensor(0.0, device=device),
-                'bbox loss': torch.tensor(0.0, device=device),
-                'gIoU loss': torch.tensor(0.0, device=device)
+                'classification loss': torch.tensor(0.0, device=device, requires_grad=True),
+                'bbox loss': torch.tensor(0.0, device=device, requires_grad=True),
+                'gIoU loss': torch.tensor(0.0, device=device, requires_grad=True)
             }
 
 
@@ -96,6 +116,21 @@ class NegGradPlusCriterion(BaseCriterion):
         try:
             if not hasattr(self, 'step_counter'):
                 self.step_counter = 0
+
+            # Filter out targets with no annotations
+            valid_targets = [t for t in y if len(t['labels']) > 0]
+
+            # If no valid targets, return zero losses
+            if not valid_targets:
+                device = x['class'].device
+                return {
+                    'classification loss': torch.tensor(0.0, device=device, requires_grad=True),
+                    'bbox loss': torch.tensor(0.0, device=device, requires_grad=True),
+                    'gIoU loss': torch.tensor(0.0, device=device, requires_grad=True)
+                }
+
+            # Use only valid targets
+            y = valid_targets
 
             ids = self.matcher(x, y)
             idx = self.getPermutationIdx(ids)
@@ -135,27 +170,35 @@ class NegGradPlusCriterion(BaseCriterion):
 
             # Box loss computation
             mask = targetClassO != self.numClass
-            boxes = x['bbox'][idx][mask]
-            targetBoxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(y, ids)], 0)[mask]
 
-            # Get classes for the matched boxes
-            boxClasses = targetClassO[mask]
+            # Ensure we have boxes to compute loss
+            if mask.any():
+                boxes = x['bbox'][idx][mask]
+                targetBoxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(y, ids)], 0)[mask]
 
-            numBoxes = len(targetBoxes) + 1e-6
+                # Get classes for the matched boxes
+                boxClasses = targetClassO[mask]
 
-            # Compute individual box losses
-            bboxLosses = nn.functional.l1_loss(boxes, targetBoxes, reduction='none')
-            giouLosses = 1 - torch.diag(gIoU(boxCxcywh2Xyxy(boxes), boxCxcywh2Xyxy(targetBoxes)))
+                numBoxes = len(targetBoxes) + 1e-6
 
-            # Create multipliers for box losses (-1 for forget classes, 1 for retain classes)
-            boxMultipliers = torch.ones(len(boxClasses), device=boxClasses.device)
-            for i, cls in enumerate(boxClasses):
-                if int(cls) in self.forget_classes:
-                    boxMultipliers[i] = -1.0
+                # Compute individual box losses
+                bboxLosses = nn.functional.l1_loss(boxes, targetBoxes, reduction='none')
+                giouLosses = 1 - torch.diag(gIoU(boxCxcywh2Xyxy(boxes), boxCxcywh2Xyxy(targetBoxes)))
 
-            # Apply multipliers and average
-            bboxLoss = (bboxLosses.sum(dim=1) * boxMultipliers).sum() / numBoxes * self.bboxCost
-            giouLoss = (giouLosses * boxMultipliers).sum() / numBoxes * self.giouCost
+                # Create multipliers for box losses (-1 for forget classes, 1 for retain classes)
+                boxMultipliers = torch.ones(len(boxClasses), device=boxClasses.device)
+                for i, cls in enumerate(boxClasses):
+                    if int(cls) in self.forget_classes:
+                        boxMultipliers[i] = -1.0
+
+                # Apply multipliers and average
+                bboxLoss = (bboxLosses.sum(dim=1) * boxMultipliers).sum() / numBoxes * self.bboxCost
+                giouLoss = (giouLosses * boxMultipliers).sum() / numBoxes * self.giouCost
+            else:
+                # If no valid boxes, use zero losses
+                device = x['class'].device
+                bboxLoss = torch.tensor(0.0, device=device, requires_grad=True)
+                giouLoss = torch.tensor(0.0, device=device, requires_grad=True)
 
             metrics = {
                 'classification loss': classificationLoss,
@@ -174,10 +217,10 @@ class NegGradPlusCriterion(BaseCriterion):
 
         except Exception as e:
             print(f"Error in computeLoss: {str(e)}")
-            # Return empty metrics to continue training
-            device = x['class'].device if 'class' in x else 'cpu'
+            # Return zero tensors with gradient
+            device = x['class'].device
             return {
-                'classification loss': torch.tensor(0.0, device=device),
-                'bbox loss': torch.tensor(0.0, device=device),
-                'gIoU loss': torch.tensor(0.0, device=device)
+                'classification loss': torch.tensor(0.0, device=device, requires_grad=True),
+                'bbox loss': torch.tensor(0.0, device=device, requires_grad=True),
+                'gIoU loss': torch.tensor(0.0, device=device, requires_grad=True)
             }
