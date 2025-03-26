@@ -9,10 +9,15 @@ import hydra
 import gc
 from tqdm import tqdm
 
+from src.datasets.OnlyForgettingSet import OnlyForgettingSet
 from src.datasets.OnlyRetainingSet import OnlyRetainingSet
+from src.datasets.RandomRelabellingSet import RandomRelabellingSet
 from src.datasets.dataset import collateFunction, load_datasets
+from src.models.NegGradCriterion import NegGradCriterion, NegGradPlusCriterion
+from src.models.ObjectDetectionMetrics import ObjectDetectionMetrics
 from src.utils.log import log_iou_metrics
-from src.models import SetCriterion
+from src.models.BaseCriterion import BaseCriterion
+
 from src.utils.utils import load_model
 from src.utils import cast2Float
 from src.utils import EarlyStopping
@@ -26,65 +31,61 @@ def main(args):
     torch.manual_seed(args.seed)
     device = torch.device(args.device)
 
-    # Generate filename based on runType
-    if args.runType == "original":
-        filename = f"original_{args.dataset}_{args.model}.pt"
-    elif args.runType == "golden":
-        filename = f"golden_{args.dataset}_{args.model}_{args.unlearningType}_{args.excludeClasses}.pt"
+    # Generate filename based on unlearningMethod
+    if args.unlearningMethod == "none":
+        filename = f"original_{args.model}_{args.dataset}.pt"
     else:
-        # Default filename if runType is not specified
-        filename = f"model_{args.model}_{args.dataset}.pt"
+        filename = f"{args.unlearningMethod}_{args.model}_{args.dataset}_{args.unlearningType}_{args.excludeClasses}.pt"
 
     # Full path to save model
     model_path = os.path.join(args.outputDir, filename)
     print(f"[+] Model will be saved to: {model_path}")
 
-    # load data
-    train_dataset, val_dataset, test_dataset= load_datasets(args)
+    # Load datasets
+    train_dataset, val_dataset, test_dataset = load_datasets(args)
 
-    # set model and criterion, load weights if available
+    # Initialize model
     model = load_model(args).to(device)
-    criterion = SetCriterion(args).to(device)
 
-    # recupero il forgetting set (che sarà nullo nel caso di original model training)
+    # Initialize criterion and metrics
+    criterion = BaseCriterion(args).to(device)
+    metrics_calculator = ObjectDetectionMetrics(args).to(device)
+
+    # Handle forgetting set (will be null in case of original model training)
     forgetting_set = args.excludeClasses
     unlearning_method = args.unlearningMethod
 
-    if unlearning_method != 'golden':
-        # se non è golden, carico il modello originale per fare unlearning da ./checkpoints che è già in config outputDir
-        model.load_state_dict(torch.load(f"{args.outputDir}/original_{args.dataset}.pt"))
+    if unlearning_method != 'none':
+        if unlearning_method != 'golden':
+            # Load original model for unlearning from ./checkpoints (set in config outputDir)
+            model.load_state_dict(torch.load(f"{args.outputDir}\original_{args.dataset}_{args.model}.pt"))
 
+    # Configure datasets based on unlearning method
     if unlearning_method == 'golden' or unlearning_method == 'finetuning':
         train_dataset = OnlyRetainingSet(train_dataset, forgetting_set, removal=args.unlearningType)
-        val_dataset = OnlyRetainingSet(val_dataset, forgetting_set, removal=args.unlearningType)
-        test_dataset = OnlyRetainingSet(test_dataset, forgetting_set, removal=args.unlearningType)
         args.numClass = len(train_dataset.classes) - (1 if train_dataset.classes[0].lower() == 'background' else 0)
+        # Reinitialize model and criterion with updated number of classes
         model = load_model(args).to(device)
-        criterion = SetCriterion(args).to(device)
+        criterion = BaseCriterion(args).to(device)
+        metrics_calculator = ObjectDetectionMetrics(args).to(device)
+
 
     elif unlearning_method == 'randomrelabelling':
-        # il train_dataset non viene modificato
-        # modifico la loss che è una crossentropy che prende come argomento il forgetting set, così ogni volta che calcola la loss per i sample del forgetting set, genera una label random
-        # criterion = ....
-        pass
+        train_dataset = RandomRelabellingSet(train_dataset, forgetting_set, removal=args.unlearningType)
+        criterion = BaseCriterion(args).to(device)
 
     elif unlearning_method == 'neggrad':
-        train_dataset = OnlyRetainingSet(train_dataset, forgetting_set, removal=args.unlearningType)
-        val_dataset = OnlyRetainingSet(val_dataset, forgetting_set, removal=args.unlearningType)
-        test_dataset = OnlyRetainingSet(test_dataset, forgetting_set, removal=args.unlearningType)
-        args.numClass = len(train_dataset.classes) - (1 if train_dataset.classes[0].lower() == 'background' else 0)
-        model = load_model(args).to(device)
-        # criterion = .... -> loss negativa
+        train_dataset = OnlyForgettingSet(train_dataset, forgetting_set, removal=args.unlearningType)
+        criterion = NegGradCriterion(args).to(device)
 
     elif unlearning_method == 'neggrad+':
-        # in questo caso il dataset rimane uguale (tutto)
-        # criterion = neggradplusloss -> calcola loss positiva su retaining set e negativa su forgetting set
-        pass
-    
+        criterion = NegGradPlusCriterion(args).to(device)
+
     elif unlearning_method == 'ours':
-        # TODO
+        # TODO: Implement custom unlearning method
         pass
 
+    # Create data loaders
     train_dataloader = DataLoader(train_dataset,
                                   batch_size=args.batchSize,
                                   shuffle=True,
@@ -108,35 +109,42 @@ def main(args):
         bias_value = -torch.log(torch.tensor((1 - 0.01) / 0.01))
         model.class_embed.layers[-1].bias.data[-1] = bias_value
 
-    # separate learning rate
-    paramDicts = [
+    # Configure optimizer with separate learning rates
+    param_dicts = [
         {"params": [p for n, p in model.named_parameters() if "backbone" not in n and p.requires_grad]},
         {"params": [p for n, p in model.named_parameters() if "backbone" in n and p.requires_grad],
          "lr": args.lrBackbone, },
     ]
 
     early_stopping = EarlyStopping(patience=args.patience)
-    optimizer = AdamW(paramDicts, args.lr, weight_decay=args.weightDecay)
-    prevBestLoss = np.inf
+    optimizer = AdamW(param_dicts, args.lr, weight_decay=args.weightDecay)
+    prev_best_loss = np.inf
     batches = len(train_dataloader)
     scaler = amp.GradScaler()
-    model.train()
-    criterion.train()
 
+    # Training loop
     for epoch in range(args.epochs):
+        # Set model and criterion to training mode
+        model.train()
+        criterion.train()
+        metrics_calculator.eval()  # Keep metrics calculator in eval mode
+
         wandb.log({"epoch": epoch}, step=epoch * batches)
         total_loss = 0.0
-        total_metrics = None  # Initialize total_metrics
+        total_metrics = None
+        total_eval_metrics = None
 
-        # MARK: - training
+        # MARK: - Training
         for batch, (imgs, targets) in enumerate(tqdm(train_dataloader)):
             imgs = imgs.to(device)
             targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
-            # gc every 50 batches
+
+            # Garbage collection every 700 batches
             if batch % 700 == 0:
                 torch.cuda.empty_cache()
                 gc.collect()
 
+            # Forward pass
             if args.amp:
                 with amp.autocast():
                     out = model(imgs)
@@ -144,19 +152,22 @@ def main(args):
             else:
                 out = model(imgs)
 
-            metrics = criterion(out, targets)
+            # Compute loss
+            loss_dict = criterion(out, targets)
+
             # Initialize total_metrics on the first batch
             if total_metrics is None:
-                total_metrics = {k: 0.0 for k in metrics}
+                total_metrics = {k: 0.0 for k in loss_dict}
 
-            # Calculate mean values progressively
-            for k, v in metrics.items():
+            # Accumulate loss values
+            for k, v in loss_dict.items():
                 total_metrics[k] += v.item()
 
-            loss = sum(v for k, v in metrics.items() if 'loss' in k)
+            # Calculate total loss
+            loss = sum(v for k, v in loss_dict.items() if 'loss' in k)
             total_loss += loss.item()
 
-            # MARK: - backpropagation
+            # Backpropagation
             optimizer.zero_grad()
             if args.amp:
                 scaler.scale(loss).backward()
@@ -171,49 +182,79 @@ def main(args):
                     torch.nn.utils.clip_grad_norm_(model.parameters(), args.clipMaxNorm)
                 optimizer.step()
 
+            # Compute evaluation metrics during training (without affecting gradients)
+            with torch.no_grad():
+                eval_metrics = metrics_calculator(out, targets)
+
+                # Initialize total_eval_metrics on the first batch
+                if total_eval_metrics is None:
+                    total_eval_metrics = {k: 0.0 for k in eval_metrics}
+
+                # Accumulate evaluation metrics
+                for k, v in eval_metrics.items():
+                    total_eval_metrics[k] += v.item()
+
         # Calculate average loss and metrics
         avg_loss = total_loss / len(train_dataloader)
         avg_metrics = {k: v / len(train_dataloader) for k, v in total_metrics.items()}
+        avg_eval_metrics = {k: v / len(train_dataloader) for k, v in total_eval_metrics.items()}
 
-        # Log IoU metrics
-        log_iou_metrics(avg_metrics, epoch * batches, "train", args.numClass)
-
+        # Log training losses
         wandb.log({"train/loss": avg_loss}, step=epoch * batches)
         print(f'Epoch {epoch}, loss: {avg_loss:.8f}')
 
         for k, v in avg_metrics.items():
             wandb.log({f"train/{k}": v}, step=epoch * batches)
 
-        # MARK: - validation
+        # Log training evaluation metrics
+        log_iou_metrics(avg_eval_metrics, epoch * batches, "train", args.numClass)
+        for k, v in avg_eval_metrics.items():
+            wandb.log({f"train_metrics/{k}": v}, step=epoch * batches)
+
+        # MARK: - Validation
         model.eval()
         criterion.eval()
+        metrics_calculator.eval()
 
         with torch.no_grad():
-            valMetrics = []
-            losses = []
+            val_losses = []
+            val_metrics = []
+            val_eval_metrics = []
+
             for imgs, targets in tqdm(val_dataloader):
                 imgs = imgs.to(device)
                 targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
                 out = model(imgs)
 
-                metrics = criterion(out, targets)
-                valMetrics.append(metrics)
-                loss = sum(v for k, v in metrics.items() if 'loss' in k)
-                losses.append(loss.cpu().item())
+                # Compute loss
+                loss_dict = criterion(out, targets)
+                val_metrics.append(loss_dict)
+                loss = sum(v for k, v in loss_dict.items() if 'loss' in k)
+                val_losses.append(loss.cpu().item())
 
-            # Compute average validation metrics
-            valMetricsDict = {k: torch.stack([m[k] for m in valMetrics]).mean().item() for k in valMetrics[0]}
+                # Compute evaluation metrics
+                eval_metrics = metrics_calculator(out, targets)
+                val_eval_metrics.append(eval_metrics)
 
-            # Log validation IoU metrics
-            log_iou_metrics(valMetricsDict, epoch * batches, "val", args.numClass)
+            # Compute average validation loss
+            val_metrics_dict = {k: torch.stack([m[k] for m in val_metrics]).mean().item() for k in val_metrics[0]}
+            avg_val_loss = np.mean(val_losses)
 
-            valMetrics = {k: torch.stack([m[k] for m in valMetrics]).mean() for k in valMetrics[0]}
-            avgLoss = np.mean(losses)
-            wandb.log({"val/loss": avgLoss}, step=epoch * batches)
-            for k, v in valMetrics.items():
-                wandb.log({f"val/{k}": v.item()}, step=epoch * batches)
+            # Compute average validation evaluation metrics
+            val_eval_metrics_dict = {k: torch.stack([m[k] for m in val_eval_metrics]).mean().item() for k in
+                                     val_eval_metrics[0]}
 
-        # check if the model is estrnn-yolos, if so, predict the first 10 images of the val set
+            # Log validation losses
+            wandb.log({"val/loss": avg_val_loss}, step=epoch * batches)
+            for k, v in val_metrics_dict.items():
+                wandb.log({f"val/{k}": v}, step=epoch * batches)
+
+            # Log validation evaluation metrics
+            log_iou_metrics(val_eval_metrics_dict, epoch * batches, "val", args.numClass)
+            for k, v in val_eval_metrics_dict.items():
+                wandb.log({f"val_metrics/{k}": v}, step=epoch * batches)
+
+        # Check if the model is estrnn-yolos, if so, predict and save the first 20 images
         if args.model == 'estrnn-yolos':
             for _i in range(20):
                 img, target = val_dataset.__getitem__(_i)
@@ -223,29 +264,26 @@ def main(args):
 
                 print(img.shape, pred.shape)
 
-                # get first image among the frames and sum it to the prediction
+                # Get first image among the frames and sum it to the prediction
                 img = img[0].squeeze().cpu().numpy()
                 pred = pred.squeeze().detach().cpu().numpy()
                 enhanced_img = img + pred
 
-                # save both original and predicted images
+                # Save both original and predicted images
                 from skimage.io import imsave
 
-                # scale the image to 0-1
+                # Scale the image to 0-1
                 enhanced_img = (enhanced_img - enhanced_img.min()) / (enhanced_img.max() - enhanced_img.min())
                 img = (img - img.min()) / (img.max() - img.min())
-                # convert to 0-255
+                # Convert to 0-255
                 enhanced_img = (enhanced_img * 255).astype(np.uint8)
                 img = (img * 255).astype(np.uint8)
                 imsave(f"{wandb.run.dir}/val_epoch{epoch}_img_{_i}.png", enhanced_img)
                 imsave(f"{wandb.run.dir}/val_img_{_i}_original.png", img)
 
-        model.train()
-        criterion.train()
-
-        # MARK: - save model
-        if avgLoss < prevBestLoss:
-            print('[+] Loss improved from {:.8f} to {:.8f}, saving model...'.format(prevBestLoss, avgLoss))
+        # MARK: - Save model
+        if avg_val_loss < prev_best_loss:
+            print('[+] Loss improved from {:.8f} to {:.8f}, saving model...'.format(prev_best_loss, avg_val_loss))
 
             # Save to local path
             torch.save(model.state_dict(), model_path)
@@ -255,37 +293,61 @@ def main(args):
             torch.save(model.state_dict(), os.path.join(wandb.run.dir, filename))
             wandb.save(os.path.join(wandb.run.dir, filename))
 
-            prevBestLoss = avgLoss
+            prev_best_loss = avg_val_loss
 
-        # MARK: - early stopping
-        if early_stopping(avgLoss):
+        # MARK: - Early stopping
+        if early_stopping(avg_val_loss):
             print('[+] Early stopping at epoch {}'.format(epoch))
             break
 
-    # MARK: - testing
+    # MARK: - Testing
     model.eval()
     criterion.eval()
+    metrics_calculator.eval()
+
     # Reset confusion matrix for testing
-    criterion.reset_confusion_matrix()
+    metrics_calculator.reset_confusion_matrix()
 
     with torch.no_grad():
-        valMetrics = []
-        losses = []
+        test_losses = []
+        test_metrics = []
+        test_eval_metrics = []
+
         for imgs, targets in tqdm(test_dataloader):
             imgs = imgs.to(device)
             targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
             out = model(imgs)
 
-            metrics = criterion(out, targets)
-            valMetrics.append(metrics)
-            loss = sum(v for k, v in metrics.items() if 'loss' in k)
-            losses.append(loss.cpu().item())
+            # Compute loss
+            loss_dict = criterion(out, targets)
+            test_metrics.append(loss_dict)
+            loss = sum(v for k, v in loss_dict.items() if 'loss' in k)
+            test_losses.append(loss.cpu().item())
 
-        # Compute average test metrics
-        testMetricsDict = {k: torch.stack([m[k] for m in valMetrics]).mean().item() for k in valMetrics[0]}
+            # Compute evaluation metrics
+            eval_metrics = metrics_calculator(out, targets)
+            test_eval_metrics.append(eval_metrics)
 
-        # Log test IoU metrics
-        log_iou_metrics(testMetricsDict, epoch * batches, "test", args.numClass)
+        # Compute average test loss
+        test_metrics_dict = {k: torch.stack([m[k] for m in test_metrics]).mean().item() for k in test_metrics[0]}
+        avg_test_loss = np.mean(test_losses)
+
+        # Compute average test evaluation metrics
+        test_eval_metrics_dict = {k: torch.stack([m[k] for m in test_eval_metrics]).mean().item() for k in
+                                  test_eval_metrics[0]}
+
+        # Log test losses
+        wandb.log({"test/loss": avg_test_loss}, step=epoch * batches)
+        for k, v in test_metrics_dict.items():
+            wandb.log({f"test/{k}": v}, step=epoch * batches)
+
+        # Log test evaluation metrics
+        log_iou_metrics(test_eval_metrics_dict, epoch * batches, "test", args.numClass)
+        for k, v in test_eval_metrics_dict.items():
+            wandb.log({f"test_metrics/{k}": v}, step=epoch * batches)
+
+        # Get and log confusion matrix
+        confusion_matrix = metrics_calculator.get_confusion_matrix()
 
         # Create class labels for confusion matrix
         class_labels = [f"class_{i}" for i in range(args.numClass)] + ["background"]
@@ -307,12 +369,6 @@ def main(args):
             }, step=epoch * batches)
         except Exception as e:
             print(f"Error logging test confusion matrix with wandb.plot: {e}")
-
-        valMetrics = {k: torch.stack([m[k] for m in valMetrics]).mean() for k in valMetrics[0]}
-        avgLoss = np.mean(losses)
-        wandb.log({"test/loss": avgLoss}, step=epoch * batches)
-        for k, v in valMetrics.items():
-            wandb.log({f"test/{k}": v.item()}, step=epoch * batches)
 
     # Make sure the final best model is saved again at the end of training
     print(f'[+] Training complete. Best model saved at {model_path}')

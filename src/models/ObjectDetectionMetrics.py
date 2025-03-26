@@ -1,5 +1,5 @@
 from src.models.matcher import HungarianMatcher
-from src.utils.boxOps import boxCxcywh2Xyxy, gIoU, boxIoU
+from src.utils.boxOps import boxCxcywh2Xyxy, boxIoU
 
 from typing import Dict, List, Tuple
 import torch
@@ -207,36 +207,24 @@ class APCalculator:
         return metrics
 
 
-class SetCriterion(nn.Module):
+class ObjectDetectionMetrics(nn.Module):
     def __init__(self, args):
-        super(SetCriterion, self).__init__()
+        super(ObjectDetectionMetrics, self).__init__()
         self.matcher = HungarianMatcher(args.classCost, args.bboxCost, args.giouCost)
         self.numClass = args.numClass
-        self.classCost = args.classCost
-        self.bboxCost = args.bboxCost
-        self.giouCost = args.giouCost
-
-        emptyWeight = torch.ones(args.numClass + 1)
-        emptyWeight[-1] = args.eosCost
-        self.register_buffer('emptyWeight', emptyWeight)
-
-        self.ap_calculator = None
+        self.ap_calculator = APCalculator(self.numClass, args.device)
         self.step_counter = 0
-
         self.confusion_matrix = None
-
         self.device = args.device
 
     def reset_confusion_matrix(self):
         """Initialize or reset the confusion matrix"""
-
         # Include background class in confusion matrix (+1)
         self.confusion_matrix = torch.zeros((self.numClass + 1, self.numClass + 1), dtype=torch.long,
                                             device=self.device)
 
     def update_confusion_matrix(self, pred_classes, target_classes):
         """Update confusion matrix with batch predictions"""
-
         if self.confusion_matrix is None:
             self.reset_confusion_matrix()
 
@@ -251,70 +239,44 @@ class SetCriterion(nn.Module):
 
     def forward(self, x: Dict[str, Tensor], y: List[Dict[str, Tensor]]) -> Dict[str, Tensor]:
         try:
-            # Initialize AP calculator
-            if self.ap_calculator is None:
-                self.ap_calculator = APCalculator(self.numClass, x['class'].device)
+            metrics = self.compute_metrics(x, y)
 
-            ans = self.computeLoss(x, y)
-
+            # Handle auxiliary predictions if present
             for i, aux in enumerate(x['aux']):
                 try:
-                    aux_losses = self.computeLoss(aux, y)
-                    ans.update({f'{k}_aux{i}': v for k, v in aux_losses.items()})
-                # Skip this auxiliary loss if there's an error but continue training
+                    aux_metrics = self.compute_metrics(aux, y)
+                    metrics.update({f'{k}_aux{i}': v for k, v in aux_metrics.items()})
                 except Exception as e:
-                    print(f"Error computing auxiliary loss {i}: {str(e)}")
+                    print(f"Error computing auxiliary metrics {i}: {str(e)}")
 
-            return ans
+            return metrics
 
         except Exception as e:
-            print(f"Error in forward pass: {str(e)}")
-            # Return just the basic losses to continue training
+            print(f"Error in metrics forward pass: {str(e)}")
+            # Return empty metrics
             return {
-                'classification loss': torch.tensor(0.0, device=x['class'].device),
-                'bbox loss': torch.tensor(0.0, device=x['class'].device),
-                'gIoU loss': torch.tensor(0.0, device=x['class'].device),
                 'mAP': torch.tensor(0.0, device=x['class'].device),
                 'mIoU': torch.tensor(0.0, device=x['class'].device)
             }
 
-    def computeLoss(self, x: Dict[str, Tensor], y: List[Dict[str, Tensor]]) -> Dict[str, Tensor]:
+    def compute_metrics(self, x: Dict[str, Tensor], y: List[Dict[str, Tensor]]) -> Dict[str, Tensor]:
         try:
             if not hasattr(self, 'step_counter'):
                 self.step_counter = 0
 
             ids = self.matcher(x, y)
-            idx = self.getPermutationIdx(ids)
+            idx = self.get_permutation_idx(ids)
 
-            # Classification loss computation
+            # Get matched predictions and targets
             logits = x['class']
             targetClassO = torch.cat([t['labels'] for t, (_, J) in zip(y, ids)])
-            targetClass = torch.full(logits.shape[:2], self.numClass, dtype=torch.int64, device=logits.device)
-            targetClass[idx] = targetClassO
 
-            classificationLoss = nn.functional.cross_entropy(logits.transpose(1, 2), targetClass, self.emptyWeight)
-            classificationLoss *= self.classCost
-
-            # Box loss computation
+            # Get boxes for matched predictions
             mask = targetClassO != self.numClass
             boxes = x['bbox'][idx][mask]
             targetBoxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(y, ids)], 0)[mask]
 
-            numBoxes = len(targetBoxes) + 1e-6
-
-            bboxLoss = nn.functional.l1_loss(boxes, targetBoxes, reduction='none')
-            bboxLoss = bboxLoss.sum() / numBoxes
-            bboxLoss *= self.bboxCost
-
-            giouLoss = 1 - torch.diag(gIoU(boxCxcywh2Xyxy(boxes), boxCxcywh2Xyxy(targetBoxes)))
-            giouLoss = giouLoss.sum() / numBoxes
-            giouLoss *= self.giouCost
-
-            metrics = {
-                'classification loss': classificationLoss,
-                'bbox loss': bboxLoss,
-                'gIoU loss': giouLoss,
-            }
+            metrics = {}
 
             with torch.no_grad():
                 matched_logits = logits[idx]
@@ -325,23 +287,19 @@ class SetCriterion(nn.Module):
                     ious = torch.diag(boxIoU(boxCxcywh2Xyxy(boxes), boxCxcywh2Xyxy(targetBoxes))[0])
 
                     # Debug print every 100 steps
-                    if self.step_counter % 100 == 0:
-                        print(
-                            f"[Step {self.step_counter}] Losses: Class={classificationLoss.item():.4f}, BBox={bboxLoss.item():.4f}, gIoU={giouLoss.item():.4f}")
-                        print(
-                            f"Pred: {predClass[:10].tolist()}... | Target: {targetClassO[:10].tolist()}...")
-                        print(
-                            f"Confidences: {confidences[:10].tolist()}... | IoUs: {ious[:10].tolist()}...")
+                    if self.step_counter % 1000 == 0:
+                        print(f"[Step {self.step_counter}] Metrics calculation")
+                        print(f"Pred: {predClass[:10].tolist()}... | Target: {targetClassO[:10].tolist()}...")
+                        print(f"Confidences: {confidences[:10].tolist()}... | IoUs: {ious[:10].tolist()}...")
 
-                    # Update confusion matrix for both matched classes
-                    # Use detach to avoid tracking gradients
+                    # Update confusion matrix for matched classes
                     if mask.any():
                         self.update_confusion_matrix(predClass[mask].detach(), targetClassO[mask].detach())
 
                     self.step_counter += 1
 
                     try:
-                        # Make sure all tensors have the same size before updating AP calculator (caused problems)
+                        # Make sure all tensors have the same size before updating AP calculator
                         if len(predClass[mask]) == len(targetClassO[mask]) == len(confidences[mask]) == len(ious):
                             # Update AP calculator with batch statistics
                             self.ap_calculator.update(
@@ -351,39 +309,35 @@ class SetCriterion(nn.Module):
                                 ious
                             )
 
-                            # Calculate all metrics at once using the compute_metrics method
-                            ap_metrics = self.ap_calculator.compute_metrics()
-                            metrics.update(ap_metrics)
+                            # Calculate all metrics at once
+                            metrics = self.ap_calculator.compute_metrics()
                         else:
                             print(f"Warning: Skipping AP calculation due to size mismatch - "
                                   f"pred: {predClass[mask].shape}, target: {targetClassO[mask].shape}, "
                                   f"conf: {confidences[mask].shape}, ious: {ious.shape}")
                             # Add empty metrics
-                            metrics.update(self.ap_calculator._create_empty_metrics())
+                            metrics = self.ap_calculator._create_empty_metrics()
                     except Exception as e:
                         print(f"Error in AP calculation: {str(e)}")
-                        # Add empty metrics to continue training
-                        metrics.update(self.ap_calculator._create_empty_metrics())
+                        # Add empty metrics
+                        metrics = self.ap_calculator._create_empty_metrics()
                 else:
                     # Create empty metrics when there are no valid boxes
-                    metrics.update(self.ap_calculator._create_empty_metrics())
+                    metrics = self.ap_calculator._create_empty_metrics()
 
             return metrics
 
         except Exception as e:
-            print(f"Error in computeLoss: {str(e)}")
-            # Return empty metrics to continue training
+            print(f"Error in compute_metrics: {str(e)}")
+            # Return empty metrics
             device = x['class'].device if 'class' in x else 'cpu'
             return {
-                'classification loss': torch.tensor(0.0, device=device),
-                'bbox loss': torch.tensor(0.0, device=device),
-                'gIoU loss': torch.tensor(0.0, device=device),
                 'mAP': torch.tensor(0.0, device=device),
                 'mIoU': torch.tensor(0.0, device=device)
             }
 
     @staticmethod
-    def getPermutationIdx(indices: List[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tensor]:
+    def get_permutation_idx(indices: List[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tensor]:
         batchIdx = torch.cat([torch.full_like(src, i) for i, (src, _) in enumerate(indices)])
         srcIdx = torch.cat([src for (src, _) in indices])
         return batchIdx, srcIdx

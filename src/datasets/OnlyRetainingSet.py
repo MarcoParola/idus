@@ -7,6 +7,7 @@ from torch.utils.data import Dataset
 class OnlyRetainingSet(Dataset):
     """
     A dataset wrapper that excludes specified classes but handles background specially.
+    Keeps all images, even those without valid annotations, by creating empty annotation tensors.
     """
 
     def __init__(self, dataset, forgetting_set=None, removal='class'):
@@ -78,33 +79,9 @@ class OnlyRetainingSet(Dataset):
         print(f"After excluding {len(self.forgetting_set)} classes: "
               f"{len(self.classes) - (1 if self.has_background else 0)} classes")
 
-        # Filter dataset to only include samples with valid annotations after exclusion
-        self.valid_indices = []
-        for idx in range(len(dataset)):
-            if self._has_valid_annotations(idx):
-                self.valid_indices.append(idx)
-
-        print(f"Dataset size after filtering: {len(self.valid_indices)}")
-
-    def _has_valid_annotations(self, idx):
-        """Check if the sample has valid annotations after exclusion."""
-        _, targets = self.dataset[idx]
-
-        if 'labels' in targets:
-            # For datasets that return tensor labels
-            labels = targets['labels'].numpy() if isinstance(targets['labels'], torch.Tensor) else targets['labels']
-
-            # Check if any label is valid (not in forgetting_set)
-            for label in labels:
-                # If it's background (0) and we're keeping background, it's valid
-                if self.has_background and label == 0:
-                    return True
-
-                # If it's not a class we're forgetting, it's valid
-                if label not in self.forgetting_set:
-                    return True
-
-        return False
+        # Include all indices, even those without annotations
+        self.valid_indices = list(range(len(dataset)))
+        print(f"Dataset size (all images): {len(self.valid_indices)}")
 
     def __len__(self) -> int:
         return len(self.valid_indices)
@@ -118,37 +95,48 @@ class OnlyRetainingSet(Dataset):
         if 'labels' in targets:
             if isinstance(targets['labels'], torch.Tensor):
                 # Get mask for valid classes (considering background preservation)
-                valid_mask = torch.tensor([
-                    (label.item() == 0 and self.has_background and self.preserve_background) or
-                    (label.item() not in self.forgetting_set)
-                    for label in targets['labels']
-                ])
+                if targets['labels'].numel() > 0:
+                    valid_mask = torch.tensor([
+                        (label.item() == 0 and self.has_background) or
+                        (label.item() not in self.forgetting_set)
+                        for label in targets['labels']
+                    ])
 
-                if 'boxes' in targets and valid_mask.any():
-                    # Filter boxes and labels
-                    boxes = targets['boxes'][valid_mask]
-                    original_labels = targets['labels'][valid_mask]
+                    if 'boxes' in targets and valid_mask.any():
+                        # Filter boxes and labels
+                        boxes = targets['boxes'][valid_mask]
+                        original_labels = targets['labels'][valid_mask]
 
-                    # Remap the class labels
-                    remapped_labels = torch.tensor([
-                        self.class_mapping[label.item()]
-                        for label in original_labels
-                    ], dtype=torch.int64)
+                        # Remap the class labels
+                        remapped_labels = torch.tensor([
+                            self.class_mapping[label.item()]
+                            for label in original_labels
+                        ], dtype=torch.int64)
 
-                    new_targets = targets.copy()
-                    new_targets['boxes'] = boxes
-                    new_targets['labels'] = remapped_labels
+                        new_targets = targets.copy()
+                        new_targets['boxes'] = boxes
+                        new_targets['labels'] = remapped_labels
 
-                    # Handle other target attributes if present
-                    for key in targets:
-                        if key not in ['boxes', 'labels'] and hasattr(targets[key], '__getitem__'):
-                            try:
-                                new_targets[key] = targets[key][valid_mask]
-                            except:
-                                # Keep original if slicing fails
+                        # Handle other target attributes if present
+                        for key in targets:
+                            if key not in ['boxes', 'labels'] and hasattr(targets[key], '__getitem__'):
+                                try:
+                                    new_targets[key] = targets[key][valid_mask]
+                                except:
+                                    # Keep original if slicing fails
+                                    new_targets[key] = targets[key]
+                    else:
+                        # No valid annotations left
+                        new_targets = {
+                            'boxes': torch.zeros(0, 4, dtype=torch.float32),
+                            'labels': torch.tensor([], dtype=torch.int64),
+                        }
+                        # Preserve other keys from original targets
+                        for key in targets:
+                            if key not in ['boxes', 'labels']:
                                 new_targets[key] = targets[key]
                 else:
-                    # No valid annotations left
+                    # Empty labels tensor
                     new_targets = {
                         'boxes': torch.zeros(0, 4, dtype=torch.float32),
                         'labels': torch.tensor([], dtype=torch.int64),

@@ -28,17 +28,17 @@ weight: ""
 lr: 1e-4
 lrBackbone: 1e-5
 batchSize: 32
-weightDecay: 1e-4
+weightDecay: 1e-5
 epochs: 100
 lrDrop: 50
 clipMaxNorm: .1
 patience: 15
 
 # MARK: - loss
-classCost: 5
-bboxCost: 0.5
-giouCost: 0.5
-eosCost: 0
+classCost: 1
+bboxCost: 5
+giouCost: 2
+eosCost: 0.1
 
 # MARK: - dataset
 dataset: "voc"
@@ -49,7 +49,6 @@ testAnnFile: ${hydra:runtime.cwd}/data/new/Test.json
 
 #MARK: - unlearning
 excludeClasses: []
-runType: "original"
 unlearningType: "CR"
 unlearningMethod: ""
 
