@@ -93,6 +93,7 @@ class OnlyRetainingSet(Dataset):
 
         # Process boxes and labels
         if 'labels' in targets:
+
             if isinstance(targets['labels'], torch.Tensor):
                 # Get mask for valid classes (considering background preservation)
                 if targets['labels'].numel() > 0:

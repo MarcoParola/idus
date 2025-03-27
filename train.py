@@ -13,10 +13,10 @@ from src.datasets.OnlyForgettingSet import OnlyForgettingSet
 from src.datasets.OnlyRetainingSet import OnlyRetainingSet
 from src.datasets.RandomRelabellingSet import RandomRelabellingSet
 from src.datasets.dataset import collateFunction, load_datasets
-from src.models.NegGradCriterion import NegGradCriterion, NegGradPlusCriterion
+from src.loss.NegGradCriterion import NegGradCriterion, NegGradPlusCriterion
 from src.models.ObjectDetectionMetrics import ObjectDetectionMetrics
 from src.utils.log import log_iou_metrics
-from src.models.BaseCriterion import BaseCriterion
+from src.loss.BaseCriterion import BaseCriterion
 
 from src.utils.utils import load_model
 from src.utils import cast2Float
@@ -72,7 +72,6 @@ def main(args):
 
     elif unlearning_method == 'randomrelabelling':
         train_dataset = RandomRelabellingSet(train_dataset, forgetting_set, removal=args.unlearningType)
-        criterion = BaseCriterion(args).to(device)
 
     elif unlearning_method == 'neggrad':
         train_dataset = OnlyForgettingSet(train_dataset, forgetting_set, removal=args.unlearningType)
