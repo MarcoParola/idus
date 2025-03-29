@@ -7,9 +7,18 @@ from torch import nn, Tensor
 
 
 class APCalculator:
-    def __init__(self, num_classes, device):
+    def __init__(self, num_classes, device, forgetting_classes=None):
         self.num_classes = num_classes
         self.device = device
+        # Store forgetting_classes as a tensor for easy indexing
+        self.forgetting_classes = torch.tensor(forgetting_classes, device=device) if forgetting_classes else None
+        # Derive retaining classes as all classes except forgetting classes
+        if self.forgetting_classes is not None:
+            self.retaining_classes = torch.tensor([c for c in range(num_classes)
+                                                   if c not in self.forgetting_classes],
+                                                  device=device)
+        else:
+            self.retaining_classes = None
         self.reset()
 
     def reset(self):
@@ -124,7 +133,7 @@ class APCalculator:
             return torch.tensor(0.0, device=self.device)
 
     def compute_metrics(self):
-        """Compute AP metrics for all classes and thresholds"""
+        """Compute AP metrics for all classes and thresholds, plus separate metrics for retaining and forgetting sets"""
         metrics = {}
 
         try:
@@ -159,7 +168,7 @@ class APCalculator:
                 else:
                     metrics[f'IoU_class_{class_id}'] = torch.tensor(0.0, device=self.device)
 
-            # Compute mAP metrics
+            # Compute global mAP metrics
             metrics['mAP_50'] = class_aps[:, 0].mean()
             metrics['mAP_75'] = class_aps[:, 1].mean()
             metrics['mAP_95'] = class_aps[:, 2].mean()
@@ -173,6 +182,57 @@ class APCalculator:
                 ])
                 all_aps.append(class_aps.mean())
             metrics['mAP'] = torch.stack(all_aps).mean()
+
+            # NEW: Compute mAP for retaining and forgetting sets if applicable
+            if self.forgetting_classes is not None and self.retaining_classes is not None:
+                # Process forgetting classes
+                forgetting_aps_50 = []
+                forgetting_aps_75 = []
+                forgetting_aps_95 = []
+                forgetting_aps_all = []
+
+                for class_id in self.forgetting_classes:
+                    class_id = class_id.item()  # Convert tensor item to int
+                    forgetting_aps_50.append(metrics[f'AP_class_{class_id}_50'])
+                    forgetting_aps_75.append(metrics[f'AP_class_{class_id}_75'])
+                    forgetting_aps_95.append(metrics[f'AP_class_{class_id}_95'])
+                    forgetting_aps_all.append(metrics[f'AP_class_{class_id}'])
+
+                # Process retaining classes
+                retaining_aps_50 = []
+                retaining_aps_75 = []
+                retaining_aps_95 = []
+                retaining_aps_all = []
+
+                for class_id in self.retaining_classes:
+                    class_id = class_id.item()  # Convert tensor item to int
+                    retaining_aps_50.append(metrics[f'AP_class_{class_id}_50'])
+                    retaining_aps_75.append(metrics[f'AP_class_{class_id}_75'])
+                    retaining_aps_95.append(metrics[f'AP_class_{class_id}_95'])
+                    retaining_aps_all.append(metrics[f'AP_class_{class_id}'])
+
+                # Calculate mean values if we have any classes in each set
+                if forgetting_aps_50:
+                    metrics['mAP_forgetting_50'] = torch.mean(torch.stack(forgetting_aps_50))
+                    metrics['mAP_forgetting_75'] = torch.mean(torch.stack(forgetting_aps_75))
+                    metrics['mAP_forgetting_95'] = torch.mean(torch.stack(forgetting_aps_95))
+                    metrics['mAP_forgetting'] = torch.mean(torch.stack(forgetting_aps_all))
+                else:
+                    metrics['mAP_forgetting_50'] = torch.tensor(0.0, device=self.device)
+                    metrics['mAP_forgetting_75'] = torch.tensor(0.0, device=self.device)
+                    metrics['mAP_forgetting_95'] = torch.tensor(0.0, device=self.device)
+                    metrics['mAP_forgetting'] = torch.tensor(0.0, device=self.device)
+
+                if retaining_aps_50:
+                    metrics['mAP_retaining_50'] = torch.mean(torch.stack(retaining_aps_50))
+                    metrics['mAP_retaining_75'] = torch.mean(torch.stack(retaining_aps_75))
+                    metrics['mAP_retaining_95'] = torch.mean(torch.stack(retaining_aps_95))
+                    metrics['mAP_retaining'] = torch.mean(torch.stack(retaining_aps_all))
+                else:
+                    metrics['mAP_retaining_50'] = torch.tensor(0.0, device=self.device)
+                    metrics['mAP_retaining_75'] = torch.tensor(0.0, device=self.device)
+                    metrics['mAP_retaining_95'] = torch.tensor(0.0, device=self.device)
+                    metrics['mAP_retaining'] = torch.tensor(0.0, device=self.device)
 
             # Compute global (mean) IoU across all predictions
             if self.global_ious:
@@ -204,6 +264,15 @@ class APCalculator:
             metrics[f'AP_class_{c}'] = torch.tensor(0.0, device=self.device)
             metrics[f'IoU_class_{c}'] = torch.tensor(0.0, device=self.device)
 
+        # Add new retaining and forgetting metrics
+        if hasattr(self, 'forgetting_classes') and self.forgetting_classes is not None:
+            metrics['mAP_forgetting'] = torch.tensor(0.0, device=self.device)
+            metrics['mAP_retaining'] = torch.tensor(0.0, device=self.device)
+
+            for threshold in [50, 75, 95]:
+                metrics[f'mAP_forgetting_{threshold}'] = torch.tensor(0.0, device=self.device)
+                metrics[f'mAP_retaining_{threshold}'] = torch.tensor(0.0, device=self.device)
+
         return metrics
 
 
@@ -212,7 +281,26 @@ class ObjectDetectionMetrics(nn.Module):
         super(ObjectDetectionMetrics, self).__init__()
         self.matcher = HungarianMatcher(args.classCost, args.bboxCost, args.giouCost)
         self.numClass = args.numClass
-        self.ap_calculator = APCalculator(self.numClass, args.device)
+
+        # Parse forgetting classes if provided
+        if hasattr(args, 'excludeClasses') and args.excludeClasses:
+            if isinstance(args.excludeClasses, str):
+                # Convert string representation to list of integers
+                try:
+                    self.forgetting_classes = [int(c.strip()) for c in args.excludeClasses.split(',')]
+                except ValueError:
+                    print(
+                        f"Warning: Could not parse excludeClasses '{args.excludeClasses}'. Format should be comma-separated integers.")
+                    self.forgetting_classes = None
+            elif isinstance(args.excludeClasses, list):
+                self.forgetting_classes = args.excludeClasses
+            else:
+                self.forgetting_classes = None
+        else:
+            self.forgetting_classes = None
+
+        # Initialize AP calculator with forgetting classes
+        self.ap_calculator = APCalculator(self.numClass, args.device, forgetting_classes=self.forgetting_classes)
         self.step_counter = 0
         self.confusion_matrix = None
         self.device = args.device
@@ -264,10 +352,6 @@ class ObjectDetectionMetrics(nn.Module):
             if not hasattr(self, 'step_counter'):
                 self.step_counter = 0
 
-            # Early return if no ground truth annotations exist
-            if not y or all(len(t['labels']) == 0 for t in y):
-                return self.ap_calculator._create_empty_metrics()
-
             ids = self.matcher(x, y)
             idx = self.get_permutation_idx(ids)
 
@@ -275,13 +359,10 @@ class ObjectDetectionMetrics(nn.Module):
             logits = x['class']
             targetClassO = torch.cat([t['labels'] for t, (_, J) in zip(y, ids)])
 
-            # Create a mask for valid annotations
+            # Get boxes for matched predictions
             mask = targetClassO != self.numClass
-
-            # Early return if no valid annotations after masking
-            if not mask.any():
-                print("No valid annotations after masking.")
-                return self.ap_calculator._create_empty_metrics()
+            boxes = x['bbox'][idx][mask]
+            targetBoxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(y, ids)], 0)[mask]
 
             metrics = {}
 
@@ -290,56 +371,46 @@ class ObjectDetectionMetrics(nn.Module):
                 softmaxed = nn.functional.softmax(matched_logits, -1)
                 confidences, predClass = softmaxed.max(-1)
 
-                # Safely get boxes and target boxes
-                try:
-                    boxes = x['bbox'][idx][mask]
-                    targetBoxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(y, ids)], 0)[mask]
-                except Exception as box_err:
-                    print(f"Error extracting boxes: {box_err}")
-                    return self.ap_calculator._create_empty_metrics()
+                if len(boxes) > 0:
+                    ious = torch.diag(boxIoU(boxCxcywh2Xyxy(boxes), boxCxcywh2Xyxy(targetBoxes))[0])
 
-                # Ensure we still have valid boxes
-                if len(boxes) == 0:
-                    print("No valid boxes found after processing.")
-                    return self.ap_calculator._create_empty_metrics()
+                    # Debug print every 100 steps
+                    if self.step_counter % 1000 == 0:
+                        print(f"[Step {self.step_counter}] Metrics calculation")
+                        print(f"Pred: {predClass[:10].tolist()}... | Target: {targetClassO[:10].tolist()}...")
+                        print(f"Confidences: {confidences[:10].tolist()}... | IoUs: {ious[:10].tolist()}...")
 
-                ious = torch.diag(boxIoU(boxCxcywh2Xyxy(boxes), boxCxcywh2Xyxy(targetBoxes))[0])
+                    # Update confusion matrix for matched classes
+                    if mask.any():
+                        self.update_confusion_matrix(predClass[mask].detach(), targetClassO[mask].detach())
 
-                # Debug print every 100 steps
-                if self.step_counter % 100 == 0:
-                    print(f"[Step {self.step_counter}] Metrics calculation")
-                    print(f"Pred: {predClass[:10].tolist()}... | Target: {targetClassO[:10].tolist()}...")
-                    print(f"Confidences: {confidences[:10].tolist()}... | IoUs: {ious[:10].tolist()}...")
+                    self.step_counter += 1
 
-                # Update confusion matrix for matched classes
-                if mask.any():
-                    self.update_confusion_matrix(predClass[mask].detach(), targetClassO[mask].detach())
+                    try:
+                        # Make sure all tensors have the same size before updating AP calculator
+                        if len(predClass[mask]) == len(targetClassO[mask]) == len(confidences[mask]) == len(ious):
+                            # Update AP calculator with batch statistics
+                            self.ap_calculator.update(
+                                predClass[mask],
+                                targetClassO[mask],
+                                confidences[mask],
+                                ious
+                            )
 
-                self.step_counter += 1
-
-                try:
-                    # Make sure all tensors have the same size before updating AP calculator
-                    if (len(predClass[mask]) == len(targetClassO[mask]) ==
-                            len(confidences[mask]) == len(ious)):
-                        # Update AP calculator with batch statistics
-                        self.ap_calculator.update(
-                            predClass[mask],
-                            targetClassO[mask],
-                            confidences[mask],
-                            ious
-                        )
-
-                        # Calculate all metrics at once
-                        metrics = self.ap_calculator.compute_metrics()
-                    else:
-                        print(f"Warning: Skipping AP calculation due to size mismatch - "
-                              f"pred: {predClass[mask].shape}, target: {targetClassO[mask].shape}, "
-                              f"conf: {confidences[mask].shape}, ious: {ious.shape}")
+                            # Calculate all metrics at once
+                            metrics = self.ap_calculator.compute_metrics()
+                        else:
+                            print(f"Warning: Skipping AP calculation due to size mismatch - "
+                                  f"pred: {predClass[mask].shape}, target: {targetClassO[mask].shape}, "
+                                  f"conf: {confidences[mask].shape}, ious: {ious.shape}")
+                            # Add empty metrics
+                            metrics = self.ap_calculator._create_empty_metrics()
+                    except Exception as e:
+                        print(f"Error in AP calculation: {str(e)}")
                         # Add empty metrics
                         metrics = self.ap_calculator._create_empty_metrics()
-                except Exception as e:
-                    print(f"Error in AP calculation: {str(e)}")
-                    # Add empty metrics
+                else:
+                    # Create empty metrics when there are no valid boxes
                     metrics = self.ap_calculator._create_empty_metrics()
 
             return metrics

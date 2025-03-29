@@ -53,6 +53,20 @@ def load_datasets(args):
             transform=transform,
         )
 
+    elif args.dataset == "kitti":
+        from src.datasets.kitti import load_kitti_dataset
+
+        transform = transforms.Compose([
+            transforms.Resize((128, 128)),
+            transforms.ToTensor(),
+        ])
+
+        train, val, test = load_kitti_dataset(
+            root=args.dataDir if hasattr(args, 'dataDir') else "./data",
+            resize=128,
+            transform=transform,
+        )
+
     elif args.dataset == "fashion":
         from src.datasets.fashion import load_fashion_dataset
 

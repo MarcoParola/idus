@@ -32,4 +32,4 @@ def load_model(args):
     if args.multi:
         model = torch.nn.DataParallel(model)
 
-    return model 
+    return model

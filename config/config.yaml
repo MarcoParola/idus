@@ -10,7 +10,7 @@ hydra:
 model: null
 seed: 42
 numGroups: 8
-numClass: 20
+numClass: 8
 growthRate: 32
 currentDir: ${hydra:runtime.cwd}
 inChans: 3
@@ -41,7 +41,7 @@ giouCost: 2
 eosCost: 0.1
 
 # MARK: - dataset
-dataset: "voc"
+dataset: "kitti"
 dataDir: ${hydra:runtime.cwd}\data\
 trainAnnFile: ${hydra:runtime.cwd}/data/new/Train.json
 valAnnFile: ${hydra:runtime.cwd}/data/new/Valid.json
