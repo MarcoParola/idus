@@ -1,4 +1,4 @@
-from src.utils import boxOps
+from src.utils import box_ops
 
 from torch import Tensor
 from typing import Dict, Union, List

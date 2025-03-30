@@ -1,5 +1,5 @@
-from src.loss.BaseCriterion import BaseCriterion
-from src.utils.boxOps import boxCxcywh2Xyxy, gIoU
+from src.loss.base_criterion import BaseCriterion
+from src.utils.box_ops import boxCxcywh2Xyxy, gIoU
 
 from typing import Dict, List
 import torch

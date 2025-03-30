@@ -8,7 +8,7 @@ import tempfile
 import os
 from collections import Counter
 
-from src.datasets.oxford_pet import load_oxford_dataset
+from src.datasets.loaders.oxford_pet import load_oxford_dataset
 
 
 class TestOxfordPetDataset(unittest.TestCase):

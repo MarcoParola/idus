@@ -1,5 +1,5 @@
 from src.models.matcher import HungarianMatcher
-from src.utils.boxOps import boxCxcywh2Xyxy, gIoU, boxIoU
+from src.utils.box_ops import boxCxcywh2Xyxy, gIoU, boxIoU
 
 from typing import Dict, List, Tuple
 import torch

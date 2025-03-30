@@ -26,7 +26,7 @@ def load_datasets(args):
     train, val, test = None, None, None
 
     if args.dataset == "oxford-pet":
-        from src.datasets.oxford_pet import load_oxford_dataset
+        from src.datasets.loaders.oxford_pet import load_oxford_dataset
 
         transform = transforms.Compose([
             transforms.Resize((128, 128)),
@@ -40,7 +40,7 @@ def load_datasets(args):
         )
 
     elif args.dataset == "oxford-pet-superclass":
-        from src.datasets.oxford_pet_superclass import load_oxford_superclass_dataset
+        from src.datasets.loaders.oxford_pet_superclass import load_oxford_superclass_dataset
 
         transform = transforms.Compose([
             transforms.Resize((128, 128)),
@@ -54,7 +54,7 @@ def load_datasets(args):
         )
 
     elif args.dataset == "kitti":
-        from src.datasets.kitti import load_kitti_dataset
+        from src.datasets.loaders.kitti import load_kitti_dataset
 
         transform = transforms.Compose([
             transforms.Resize((128, 128)),
@@ -68,7 +68,7 @@ def load_datasets(args):
         )
 
     elif args.dataset == "fashion":
-        from src.datasets.fashion import load_fashion_dataset
+        from src.datasets.loaders.fashion import load_fashion_dataset
 
         transform = transforms.Compose([
             transforms.Resize((128, 128)),
@@ -80,7 +80,7 @@ def load_datasets(args):
             transform=transform,)
 
     elif args.dataset == "voc":
-        from src.datasets.voc import load_voc_dataset
+        from src.datasets.loaders.voc import load_voc_dataset
 
         transform = transforms.Compose([
             transforms.Resize((128, 128)),

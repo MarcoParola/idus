@@ -6,7 +6,7 @@ import torchvision.transforms as T
 from PIL import Image
 from torch import Tensor
 
-from .boxOps import boxCxcywh2Xyxy, boxXyxy2Cxcywh
+from .box_ops import boxCxcywh2Xyxy, boxXyxy2Cxcywh
 
 
 class RandomOrder(object):

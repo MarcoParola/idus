@@ -10,14 +10,14 @@ import hydra
 import gc
 from tqdm import tqdm
 
-from src.datasets.OnlyForgettingSet import OnlyForgettingSet
-from src.datasets.OnlyRetainingSet import OnlyRetainingSet
-from src.datasets.RandomRelabellingSet import RandomRelabellingSet
+from src.datasets.wrappers.only_forgetting_set import OnlyForgettingSet
+from src.datasets.wrappers.only_retaining_set import OnlyRetainingSet
+from src.datasets.wrappers.random_relabelling_set import RandomRelabellingSet
 from src.datasets.dataset import collateFunction, load_datasets
-from src.loss.NegGradCriterion import NegGradCriterion, NegGradPlusCriterion
-from src.models.ObjectDetectionMetrics import ObjectDetectionMetrics
+from src.loss.neggrad_criterion import NegGradCriterion, NegGradPlusCriterion
+from src.models.object_detection_metrics import ObjectDetectionMetrics
 from src.utils.log import log_iou_metrics
-from src.loss.BaseCriterion import BaseCriterion
+from src.loss.base_criterion import BaseCriterion
 
 from src.utils.utils import load_model
 from src.utils import cast2Float
