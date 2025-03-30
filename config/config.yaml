@@ -38,7 +38,7 @@ patience: 15
 classCost: 1
 bboxCost: 5
 giouCost: 2
-eosCost: 0.1
+eosCost: 0
 
 # MARK: - dataset
 dataset: "kitti"

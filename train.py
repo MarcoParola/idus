@@ -57,7 +57,7 @@ def main(args):
     unlearning_method = args.unlearningMethod
 
     # Flag to check if we have forgetting/retaining metrics
-    has_forgetting_metrics = forgetting_set is not None and forgetting_set != ''
+    has_forgetting_metrics = forgetting_set is not None and forgetting_set != []
 
     if unlearning_method != 'none':
         if unlearning_method != 'golden':
