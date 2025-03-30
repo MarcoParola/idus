@@ -209,7 +209,7 @@ def main(args):
             wandb.log({f"train/{k}": v}, step=epoch * batches)
 
         # Log training evaluation metrics using the updated function
-        log_iou_metrics(avg_eval_metrics, epoch * batches, "train", args.numClass, has_forgetting_metrics)
+        log_iou_metrics(avg_eval_metrics, epoch * batches, "train", args.numClass, False)
 
         # MARK: - Validation
         model.eval()
