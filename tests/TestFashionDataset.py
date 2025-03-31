@@ -8,7 +8,7 @@ import tempfile
 import os
 from collections import Counter
 
-from src.datasets.fashion import load_fashion_dataset
+from src.datasets.loaders.fashion import load_fashion_dataset
 
 
 class TestFashionDataset(unittest.TestCase):

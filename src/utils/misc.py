@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from torch import nn, Tensor
 
-from .boxOps import boxCxcywh2Xyxy
+from .box_ops import boxCxcywh2Xyxy
 
 
 class PostProcess(nn.Module):

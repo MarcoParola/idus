@@ -3,7 +3,7 @@ import torch
 from scipy.optimize import linear_sum_assignment
 from torch import nn, Tensor
 
-from src.utils.boxOps import gIoU, boxCxcywh2Xyxy
+from src.utils.box_ops import gIoU, boxCxcywh2Xyxy
 
 
 class HungarianMatcher(nn.Module):

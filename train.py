@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import pandas as pd
 import torch
 from torch.cuda import amp
 from torch.optim import AdamW
@@ -9,14 +10,14 @@ import hydra
 import gc
 from tqdm import tqdm
 
-from src.datasets.OnlyForgettingSet import OnlyForgettingSet
-from src.datasets.OnlyRetainingSet import OnlyRetainingSet
-from src.datasets.RandomRelabellingSet import RandomRelabellingSet
+from src.datasets.wrappers.only_forgetting_set import OnlyForgettingSet
+from src.datasets.wrappers.only_retaining_set import OnlyRetainingSet
+from src.datasets.wrappers.random_relabelling_set import RandomRelabellingSet
 from src.datasets.dataset import collateFunction, load_datasets
-from src.loss.NegGradCriterion import NegGradCriterion, NegGradPlusCriterion
-from src.models.ObjectDetectionMetrics import ObjectDetectionMetrics
+from src.loss.neggrad_criterion import NegGradCriterion, NegGradPlusCriterion
+from src.models.object_detection_metrics import ObjectDetectionMetrics
 from src.utils.log import log_iou_metrics
-from src.loss.BaseCriterion import BaseCriterion
+from src.loss.base_criterion import BaseCriterion
 
 from src.utils.utils import load_model
 from src.utils import cast2Float
@@ -55,10 +56,13 @@ def main(args):
     forgetting_set = args.excludeClasses
     unlearning_method = args.unlearningMethod
 
+    # Flag to check if we have forgetting/retaining metrics
+    has_forgetting_metrics = forgetting_set is not None and forgetting_set != []
+
     if unlearning_method != 'none':
         if unlearning_method != 'golden':
             # Load original model for unlearning from ./checkpoints (set in config outputDir)
-            model.load_state_dict(torch.load(f"{args.outputDir}\original_{args.dataset}_{args.model}.pt"))
+            model.load_state_dict(torch.load(f"{args.outputDir}/original_{args.dataset}_{args.model}.pt"))
 
     # Configure datasets based on unlearning method
     if unlearning_method == 'golden' or unlearning_method == 'finetuning':
@@ -68,7 +72,6 @@ def main(args):
         model = load_model(args).to(device)
         criterion = BaseCriterion(args).to(device)
         metrics_calculator = ObjectDetectionMetrics(args).to(device)
-
 
     elif unlearning_method == 'randomrelabelling':
         train_dataset = RandomRelabellingSet(train_dataset, forgetting_set, removal=args.unlearningType)
@@ -205,10 +208,8 @@ def main(args):
         for k, v in avg_metrics.items():
             wandb.log({f"train/{k}": v}, step=epoch * batches)
 
-        # Log training evaluation metrics
-        log_iou_metrics(avg_eval_metrics, epoch * batches, "train", args.numClass)
-        for k, v in avg_eval_metrics.items():
-            wandb.log({f"train_metrics/{k}": v}, step=epoch * batches)
+        # Log training evaluation metrics using the updated function
+        log_iou_metrics(avg_eval_metrics, epoch * batches, "train", args.numClass, False)
 
         # MARK: - Validation
         model.eval()
@@ -248,37 +249,8 @@ def main(args):
             for k, v in val_metrics_dict.items():
                 wandb.log({f"val/{k}": v}, step=epoch * batches)
 
-            # Log validation evaluation metrics
-            log_iou_metrics(val_eval_metrics_dict, epoch * batches, "val", args.numClass)
-            for k, v in val_eval_metrics_dict.items():
-                wandb.log({f"val_metrics/{k}": v}, step=epoch * batches)
-
-        # Check if the model is estrnn-yolos, if so, predict and save the first 20 images
-        if args.model == 'estrnn-yolos':
-            for _i in range(20):
-                img, target = val_dataset.__getitem__(_i)
-                print(img.shape)
-
-                pred = model.estrnn_enhancer(img.unsqueeze(0))
-
-                print(img.shape, pred.shape)
-
-                # Get first image among the frames and sum it to the prediction
-                img = img[0].squeeze().cpu().numpy()
-                pred = pred.squeeze().detach().cpu().numpy()
-                enhanced_img = img + pred
-
-                # Save both original and predicted images
-                from skimage.io import imsave
-
-                # Scale the image to 0-1
-                enhanced_img = (enhanced_img - enhanced_img.min()) / (enhanced_img.max() - enhanced_img.min())
-                img = (img - img.min()) / (img.max() - img.min())
-                # Convert to 0-255
-                enhanced_img = (enhanced_img * 255).astype(np.uint8)
-                img = (img * 255).astype(np.uint8)
-                imsave(f"{wandb.run.dir}/val_epoch{epoch}_img_{_i}.png", enhanced_img)
-                imsave(f"{wandb.run.dir}/val_img_{_i}_original.png", img)
+            # Log validation evaluation metrics using the updated function
+            log_iou_metrics(val_eval_metrics_dict, epoch * batches, "val", args.numClass, has_forgetting_metrics)
 
         # MARK: - Save model
         if avg_val_loss < prev_best_loss:
@@ -340,10 +312,34 @@ def main(args):
         for k, v in test_metrics_dict.items():
             wandb.log({f"test/{k}": v}, step=epoch * batches)
 
-        # Log test evaluation metrics
-        log_iou_metrics(test_eval_metrics_dict, epoch * batches, "test", args.numClass)
-        for k, v in test_eval_metrics_dict.items():
-            wandb.log({f"test_metrics/{k}": v}, step=epoch * batches)
+        # Log test evaluation metrics using the updated function
+        log_iou_metrics(test_eval_metrics_dict, epoch * batches, "test", args.numClass, has_forgetting_metrics)
+
+        # Create an additional dedicated panel for forgetting/retaining metrics comparison
+        if has_forgetting_metrics:
+            # Prepare data for a bar chart comparing retaining vs forgetting performance
+            comparison_data = {
+                "Class Group": ["Retaining", "Forgetting"],
+                "mAP": [test_eval_metrics_dict.get('mAP_retaining', 0.0),
+                        test_eval_metrics_dict.get('mAP_forgetting', 0.0)],
+                "mAP_50": [test_eval_metrics_dict.get('mAP_retaining_50', 0.0),
+                           test_eval_metrics_dict.get('mAP_forgetting_50', 0.0)],
+                "mAP_75": [test_eval_metrics_dict.get('mAP_retaining_75', 0.0),
+                           test_eval_metrics_dict.get('mAP_forgetting_75', 0.0)]
+            }
+
+            try:
+                # Log a custom bar chart for comparing retaining vs forgetting performance
+                table = wandb.Table(dataframe=pd.DataFrame(comparison_data))
+                wandb.log({
+                    "test/retaining_vs_forgetting": wandb.plot.bar(
+                        table, "Class Group",
+                        ["mAP", "mAP_50", "mAP_75"],
+                        title="Retaining vs Forgetting Classes Performance"
+                    )
+                }, step=epoch * batches)
+            except Exception as e:
+                print(f"Error creating retaining vs forgetting comparison chart: {e}")
 
         # Get and log confusion matrix
         confusion_matrix = metrics_calculator.get_confusion_matrix()
@@ -368,6 +364,8 @@ def main(args):
             }, step=epoch * batches)
         except Exception as e:
             print(f"Error logging test confusion matrix with wandb.plot: {e}")
+            # Fallback to logging raw confusion matrix
+            wandb.log({"test/raw_confusion_matrix": confusion_matrix.cpu().numpy()}, step=epoch * batches)
 
     # Make sure the final best model is saved again at the end of training
     print(f'[+] Training complete. Best model saved at {model_path}')
