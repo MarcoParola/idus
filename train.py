@@ -62,7 +62,7 @@ def main(args):
     if unlearning_method != 'none':
         if unlearning_method != 'golden':
             # Load original model for unlearning from ./checkpoints (set in config outputDir)
-            model.load_state_dict(torch.load(f"{args.outputDir}/original_{args.dataset}_{args.model}.pt"))
+            model.load_state_dict(torch.load(f"{args.outputDir}\original_{args.model}_{args.dataset}.pt"))
 
     # Configure datasets based on unlearning method
     if unlearning_method == 'golden' or unlearning_method == 'finetuning':

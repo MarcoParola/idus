@@ -8,21 +8,23 @@ from torch.utils.data import random_split
 from src.datasets.dataset import DetectionDataset
 
 
+class ClassPreservingSubset(torch.utils.data.Subset):
+    """A Subset that preserves attributes from the original dataset."""
+
+    def __init__(self, dataset, indices):
+        super().__init__(dataset, indices)
+        # Copy all attributes from the original dataset except those in Subset
+        for key, value in dataset.__dict__.items():
+            if not hasattr(self, key):
+                setattr(self, key, value)
+
+
 def load_kitti_dataset(root="./data", resize=224, transform=None):
     """
     Load KITTI detection dataset, dividing training data into three equal parts
     for train, validation, and test sets.
-
-    Args:
-        root: Root directory for the KITTI dataset
-        resize: Image resize dimension
-        transform: Transforms to apply to the images
-
-    Returns:
-        tuple: (train_dataset, val_dataset, test_dataset)
     """
     # Create train dataset using torchvision Kitti
-    # Ignore the original test dataset as it has no annotations
     train_dataset = Kitti(root=root, train=True, download=True)
 
     print(f"Original train dataset size: {len(train_dataset)}")
@@ -36,12 +38,18 @@ def load_kitti_dataset(root="./data", resize=224, transform=None):
     val_size = int(total_size / 3)
     test_size = total_size - train_size - val_size  # Account for any rounding
 
-    # Create the splits with fixed random seed for reproducibility
-    train, val, test = random_split(
-        full_train,
-        [train_size, val_size, test_size],
-        generator=torch.Generator().manual_seed(42)
-    )
+    # Create indices for the splits with fixed random seed for reproducibility
+    generator = torch.Generator().manual_seed(42)
+    indices = torch.randperm(total_size, generator=generator).tolist()
+
+    train_indices = indices[:train_size]
+    val_indices = indices[train_size:train_size + val_size]
+    test_indices = indices[train_size + val_size:]
+
+    # Create custom subsets that preserve the classes attribute
+    train = ClassPreservingSubset(full_train, train_indices)
+    val = ClassPreservingSubset(full_train, val_indices)
+    test = ClassPreservingSubset(full_train, test_indices)
 
     print(f"Final training samples: {len(train)}")
     print(f"Final validation samples: {len(val)}")
