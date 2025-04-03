@@ -12,8 +12,8 @@ from tqdm import tqdm
 
 from src.datasets.wrappers.only_forgetting_set import OnlyForgettingSet
 from src.datasets.wrappers.only_retaining_set import OnlyRetainingSet
-from src.datasets.wrappers.random_relabelling_set import RandomRelabellingSet
 from src.datasets.dataset import collateFunction, load_datasets
+from src.datasets.wrappers.random_relabelling_set import RandomRelabellingSet
 from src.loss.neggrad_criterion import NegGradCriterion, NegGradPlusCriterion
 from src.models.object_detection_metrics import ObjectDetectionMetrics
 from src.utils.log import log_iou_metrics
@@ -48,10 +48,6 @@ def main(args):
     # Initialize model
     model = load_model(args).to(device)
 
-    # Initialize criterion and metrics
-    criterion = BaseCriterion(args).to(device)
-    metrics_calculator = ObjectDetectionMetrics(args).to(device)
-
     # Handle forgetting set (will be null in case of original model training)
     forgetting_set = args.excludeClasses
     unlearning_method = args.unlearningMethod
@@ -61,50 +57,54 @@ def main(args):
 
     if unlearning_method != 'none':
         if unlearning_method != 'golden':
-            # Load original model for unlearning from ./checkpoints (set in config outputDir)
-            model.load_state_dict(torch.load(f"{args.outputDir}\original_{args.model}_{args.dataset}.pt"))
+            # Load original model for unlearning from ./checkpoints
+            model.load_state_dict(torch.load(f"{args.outputDir}/original_{args.model}_{args.dataset}.pt"))
 
-    # Configure datasets based on unlearning method
-    if unlearning_method == 'golden' or unlearning_method == 'finetuning':
-        train_dataset = OnlyRetainingSet(train_dataset, forgetting_set, removal=args.unlearningType)
-        args.numClass = len(train_dataset.classes) - (1 if train_dataset.classes[0].lower() == 'background' else 0)
-        # Reinitialize model and criterion with updated number of classes
-        model = load_model(args).to(device)
-        criterion = BaseCriterion(args).to(device)
-        metrics_calculator = ObjectDetectionMetrics(args).to(device)
+    # Initialize standard validation criterion for always using positive gradients during validation
+    validation_criterion = BaseCriterion(args).to(device)
+    metrics_calculator = ObjectDetectionMetrics(args).to(device)
 
-    elif unlearning_method == 'randomrelabelling':
-        train_dataset = RandomRelabellingSet(train_dataset, forgetting_set, removal=args.unlearningType)
-
-    elif unlearning_method == 'neggrad':
+    # Configure datasets and criterion based on unlearning method
+    if unlearning_method == 'neggrad':
+        # Only use forgetting classes for training
         train_dataset = OnlyForgettingSet(train_dataset, forgetting_set, removal=args.unlearningType)
-        criterion = NegGradCriterion(args).to(device)
-
+        # Use negative gradients during training
+        train_criterion = NegGradCriterion(args).to(device)
     elif unlearning_method == 'neggrad+':
-        criterion = NegGradPlusCriterion(args).to(device)
-
-    elif unlearning_method == 'ours':
-        # TODO: Implement custom unlearning method
-        pass
+        # Keep all classes during training
+        train_criterion = NegGradPlusCriterion(args).to(device)
+    else:
+        # For other methods, use their respective configurations
+        train_criterion = BaseCriterion(args).to(device)
+        if unlearning_method == 'golden' or unlearning_method == 'finetuning':
+            train_dataset = OnlyRetainingSet(train_dataset, forgetting_set, removal=args.unlearningType)
+            args.numClass = len(train_dataset.classes) - (1 if train_dataset.classes[0].lower() == 'background' else 0)
+            # Reinitialize model and criteria with updated number of classes
+            model = load_model(args).to(device)
+            train_criterion = BaseCriterion(args).to(device)
+            validation_criterion = BaseCriterion(args).to(device)
+            metrics_calculator = ObjectDetectionMetrics(args).to(device)
+        elif unlearning_method == 'randomrelabelling':
+            train_dataset = RandomRelabellingSet(train_dataset, forgetting_set, removal=args.unlearningType)
 
     # Create data loaders
     train_dataloader = DataLoader(train_dataset,
-                                  batch_size=args.batchSize,
-                                  shuffle=True,
-                                  collate_fn=collateFunction,
-                                  num_workers=args.numWorkers)
+                                 batch_size=args.batchSize,
+                                 shuffle=True,
+                                 collate_fn=collateFunction,
+                                 num_workers=args.numWorkers)
 
     val_dataloader = DataLoader(val_dataset,
-                                batch_size=args.batchSize,
+                               batch_size=args.batchSize,
+                               shuffle=False,
+                               collate_fn=collateFunction,
+                               num_workers=args.numWorkers)
+
+    test_dataloader = DataLoader(test_dataset,
+                                batch_size=1,
                                 shuffle=False,
                                 collate_fn=collateFunction,
                                 num_workers=args.numWorkers)
-
-    test_dataloader = DataLoader(test_dataset,
-                                 batch_size=1,
-                                 shuffle=False,
-                                 collate_fn=collateFunction,
-                                 num_workers=args.numWorkers)
 
     with torch.no_grad():
         # Set the background class bias to match DETR's initialization
@@ -128,7 +128,8 @@ def main(args):
     for epoch in range(args.epochs):
         # Set model and criterion to training mode
         model.train()
-        criterion.train()
+        train_criterion.train()
+        validation_criterion.eval()  # Keep validation criterion in eval mode
         metrics_calculator.eval()  # Keep metrics calculator in eval mode
 
         wandb.log({"epoch": epoch}, step=epoch * batches)
@@ -154,8 +155,8 @@ def main(args):
             else:
                 out = model(imgs)
 
-            # Compute loss
-            loss_dict = criterion(out, targets)
+            # Compute loss using train_criterion (negative gradients for forgetting classes)
+            loss_dict = train_criterion(out, targets)
 
             # Initialize total_metrics on the first batch
             if total_metrics is None:
@@ -208,12 +209,12 @@ def main(args):
         for k, v in avg_metrics.items():
             wandb.log({f"train/{k}": v}, step=epoch * batches)
 
-        # Log training evaluation metrics using the updated function
+        # Log training evaluation metrics
         log_iou_metrics(avg_eval_metrics, epoch * batches, "train", args.numClass, False)
 
         # MARK: - Validation
         model.eval()
-        criterion.eval()
+        validation_criterion.eval()  # Use standard positive criterion for validation
         metrics_calculator.eval()
 
         with torch.no_grad():
@@ -226,8 +227,8 @@ def main(args):
                 targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
                 out = model(imgs)
 
-                # Compute loss
-                loss_dict = criterion(out, targets)
+                # Compute loss using standard validation criterion (positive gradients)
+                loss_dict = validation_criterion(out, targets)
                 val_metrics.append(loss_dict)
                 loss = sum(v for k, v in loss_dict.items() if 'loss' in k)
                 val_losses.append(loss.cpu().item())
@@ -242,14 +243,14 @@ def main(args):
 
             # Compute average validation evaluation metrics
             val_eval_metrics_dict = {k: torch.stack([m[k] for m in val_eval_metrics]).mean().item() for k in
-                                     val_eval_metrics[0]}
+                                    val_eval_metrics[0]}
 
             # Log validation losses
             wandb.log({"val/loss": avg_val_loss}, step=epoch * batches)
             for k, v in val_metrics_dict.items():
                 wandb.log({f"val/{k}": v}, step=epoch * batches)
 
-            # Log validation evaluation metrics using the updated function
+            # Log validation evaluation metrics
             log_iou_metrics(val_eval_metrics_dict, epoch * batches, "val", args.numClass, has_forgetting_metrics)
 
         # MARK: - Save model
@@ -273,7 +274,7 @@ def main(args):
 
     # MARK: - Testing
     model.eval()
-    criterion.eval()
+    validation_criterion.eval()  # Use standard positive criterion for testing too
     metrics_calculator.eval()
 
     # Reset confusion matrix for testing
@@ -289,8 +290,8 @@ def main(args):
             targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
             out = model(imgs)
 
-            # Compute loss
-            loss_dict = criterion(out, targets)
+            # Compute loss using standard validation criterion (positive gradients)
+            loss_dict = validation_criterion(out, targets)
             test_metrics.append(loss_dict)
             loss = sum(v for k, v in loss_dict.items() if 'loss' in k)
             test_losses.append(loss.cpu().item())
@@ -305,14 +306,14 @@ def main(args):
 
         # Compute average test evaluation metrics
         test_eval_metrics_dict = {k: torch.stack([m[k] for m in test_eval_metrics]).mean().item() for k in
-                                  test_eval_metrics[0]}
+                                 test_eval_metrics[0]}
 
         # Log test losses
         wandb.log({"test/loss": avg_test_loss}, step=epoch * batches)
         for k, v in test_metrics_dict.items():
             wandb.log({f"test/{k}": v}, step=epoch * batches)
 
-        # Log test evaluation metrics using the updated function
+        # Log test evaluation metrics
         log_iou_metrics(test_eval_metrics_dict, epoch * batches, "test", args.numClass, has_forgetting_metrics)
 
         # Create an additional dedicated panel for forgetting/retaining metrics comparison
@@ -321,11 +322,11 @@ def main(args):
             comparison_data = {
                 "Class Group": ["Retaining", "Forgetting"],
                 "mAP": [test_eval_metrics_dict.get('mAP_retaining', 0.0),
-                        test_eval_metrics_dict.get('mAP_forgetting', 0.0)],
+                       test_eval_metrics_dict.get('mAP_forgetting', 0.0)],
                 "mAP_50": [test_eval_metrics_dict.get('mAP_retaining_50', 0.0),
-                           test_eval_metrics_dict.get('mAP_forgetting_50', 0.0)],
+                          test_eval_metrics_dict.get('mAP_forgetting_50', 0.0)],
                 "mAP_75": [test_eval_metrics_dict.get('mAP_retaining_75', 0.0),
-                           test_eval_metrics_dict.get('mAP_forgetting_75', 0.0)]
+                          test_eval_metrics_dict.get('mAP_forgetting_75', 0.0)]
             }
 
             try:

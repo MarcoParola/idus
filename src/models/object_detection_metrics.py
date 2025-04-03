@@ -202,7 +202,6 @@ class APCalculator:
                 forgetting_aps_all = []
 
                 for class_id in self.forgetting_classes:
-                    print(class_id)
                     class_id_int = int(class_id.item())  # Ensure conversion to Python int
                     if f'AP_class_{class_id_int}_50' in metrics:  # Check if metrics exist for this class
                         forgetting_aps_50.append(metrics[f'AP_class_{class_id_int}_50'])

@@ -15,6 +15,7 @@ class NegGradCriterion(BaseCriterion):
     def __init__(self, args):
         super(NegGradCriterion, self).__init__(args)
         self.forget_classes = args.excludeClasses if hasattr(args, 'excludeClasses') else []
+        self.multiplier = args.multiplier
 
     def computeLoss(self, x: Dict[str, Tensor], y: List[Dict[str, Tensor]]) -> Dict[str, Tensor]:
         try:
@@ -72,9 +73,9 @@ class NegGradCriterion(BaseCriterion):
                 giouLoss = torch.tensor(0.0, device=device, requires_grad=True)
 
             # Apply negative gradient since this is the forgetting set
-            classificationLoss = -classificationLoss
-            bboxLoss = -bboxLoss
-            giouLoss = -giouLoss
+            classificationLoss = -self.multiplier*classificationLoss
+            bboxLoss = -self.multiplier*bboxLoss
+            giouLoss = -self.multiplier*giouLoss
 
             metrics = {
                 'classification loss': classificationLoss,
@@ -111,6 +112,7 @@ class NegGradPlusCriterion(BaseCriterion):
     def __init__(self, args):
         super(NegGradPlusCriterion, self).__init__(args)
         self.forget_classes = args.excludeClasses if hasattr(args, 'excludeClasses') else []
+        self.multiplier = args.multiplier
 
     def computeLoss(self, x: Dict[str, Tensor], y: List[Dict[str, Tensor]]) -> Dict[str, Tensor]:
         try:
@@ -163,7 +165,7 @@ class NegGradPlusCriterion(BaseCriterion):
             # For forget classes, set multiplier to -1.0 (negative gradient)
             for i, (batch_i, src_i) in enumerate(zip(batchIdx, srcIdx)):
                 if int(targetClassO[i]) in self.forget_classes:
-                    classMultiplier[batch_i, src_i] = -1.0
+                    classMultiplier[batch_i, src_i] = -self.multiplier
 
             # Apply the multiplier and take mean
             classificationLoss = (classLoss * classMultiplier).mean() * self.classCost
@@ -189,7 +191,7 @@ class NegGradPlusCriterion(BaseCriterion):
                 boxMultipliers = torch.ones(len(boxClasses), device=boxClasses.device)
                 for i, cls in enumerate(boxClasses):
                     if int(cls) in self.forget_classes:
-                        boxMultipliers[i] = -1.0
+                        boxMultipliers[i] = -self.multiplier
 
                 # Apply multipliers and average
                 bboxLoss = (bboxLosses.sum(dim=1) * boxMultipliers).sum() / numBoxes * self.bboxCost

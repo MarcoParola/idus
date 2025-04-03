@@ -51,6 +51,7 @@ testAnnFile: ${hydra:runtime.cwd}/data/new/Test.json
 excludeClasses: []
 unlearningType: "CR"
 unlearningMethod: ""
+multiplier: 1
 
 # MARK: - miscellaneous
 outputDir: ${hydra:runtime.cwd}\checkpoint
